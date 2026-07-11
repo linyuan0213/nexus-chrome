@@ -1,0 +1,114 @@
+name: Nexus Media Chrome Docker
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v*
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build Docker Image
+    needs: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Release version
+        id: release_version
+        run: |
+          echo "app_version=$(echo $GITHUB_REF_NAME | sed 's/v\(.*\)/\1/')" >> $GITHUB_ENV
+
+      - name: Set Up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set Up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v7
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:latest
+            ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:${{ env.app_version }}
+            ghcr.io/${{ github.repository_owner }}/nexus-media-chrome:latest
+            ghcr.io/${{ github.repository_owner }}/nexus-media-chrome:${{ env.app_version }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    name: Create Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Extract version and changelog
+        id: extract
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+
+          CONTENT=$(awk '/^## v'"$VERSION"' /{flag=1;next}/^## v/{flag=0}flag' README.md)
+          if [ -z "$CONTENT" ]; then
+            CONTENT="Nexus Media Chrome $GITHUB_REF_NAME 已发布。"
+          fi
+
+          {
+            echo "notes<<CHANGELOG_EOF"
+            echo "$CONTENT"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Nexus Media Chrome ${{ steps.extract.outputs.tag }}
+          body: ${{ steps.extract.outputs.notes }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Telegram notification
+        env:
+          NOTES: ${{ steps.extract.outputs.notes }}
+        run: |
+          printf '%s\n' "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' > notes.txt
+          {
+            echo '<b>Nexus Media Chrome ${{ steps.extract.outputs.tag }} 已发布</b>'
+            echo ''
+            echo '<pre>'
+            cat notes.txt
+            echo '</pre>'
+            echo ''
+            echo '📦 Docker: <code>docker pull ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:${{ steps.extract.outputs.version }}</code>'
+            echo '🔗 <a href="https://github.com/${{ github.repository }}/releases/tag/${{ steps.extract.outputs.tag }}">查看 Release</a>'
+          } > telegram_msg.txt
+
+      - name: Send Telegram Notification
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: html
+          message_file: telegram_msg.txt

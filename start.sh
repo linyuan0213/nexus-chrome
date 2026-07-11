@@ -1,15 +1,19 @@
 #!/bin/bash
 
-# 设置默认密码
+# VNC 密码检查：不允许使用默认密码部署
 if [ -z "$VNC_PASSWORD" ]; then
-    echo "VNC_PASSWORD environment variable not set, using default password 'password'"
-    export VNC_PASSWORD=password
-else
-    echo "Using VNC_PASSWORD from environment variable: $VNC_PASSWORD"
+    echo "ERROR: VNC_PASSWORD environment variable is not set." >&2
+    echo "Please set a strong password for VNC access, e.g.:" >&2
+    echo "  docker run -e VNC_PASSWORD=your_secure_password ..." >&2
+    exit 1
 fi
 
-# 替换supervisord.conf中的x11vnc密码
-sed -i "s/-passwd password/-passwd $VNC_PASSWORD/g" /etc/supervisord.conf
+if [ "$VNC_PASSWORD" = "password" ]; then
+    echo "ERROR: VNC_PASSWORD cannot be the default value 'password'." >&2
+    exit 1
+fi
 
-# 启动supervisord
+export VNC_PASSWORD
+
+# 启动 supervisord
 exec supervisord -c /etc/supervisord.conf
