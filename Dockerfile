@@ -35,11 +35,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pil && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 添加 Google Chrome 官方 apt 源并安装 Chrome
-RUN wget -qO /usr/share/keyrings/google-chrome.asc https://dl-ssl.google.com/linux/linux_signing_key.pub && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends google-chrome-stable && \
+# 安装 Chrome：amd64 使用 Google 官方 Chrome，arm64 回退到 Debian chromium
+# （Google 尚未在 apt 仓库发布 arm64 的 google-chrome-stable 包）
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    if [ "$arch" = "amd64" ]; then \
+        wget -qO /usr/share/keyrings/google-chrome.asc https://dl-ssl.google.com/linux/linux_signing_key.pub; \
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends google-chrome-stable; \
+    else \
+        apt-get update; \
+        apt-get install -y --no-install-recommends chromium chromium-driver; \
+        ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable; \
+    fi; \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 生成中文区域设置
