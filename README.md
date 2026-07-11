@@ -194,4 +194,4 @@ uv run pytest tests/ -v
 
 ## 许可证
 
-GNU General Public License v3.0 (GPL-3.0) - 详见 LICENSE 文件。
+MIT License - 详见 LICENSE 文件。
