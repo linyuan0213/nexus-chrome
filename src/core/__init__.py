@@ -1,1 +1,1 @@
-"""Core functionality for Nexus Media Chrome Server."""
+"""Core functionality for Nexus Chrome Server."""

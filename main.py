@@ -1,4 +1,4 @@
-"""Nexus Media Chrome Server 入口点"""
+"""Nexus Chrome Server 入口点"""
 import uvicorn
 
 if __name__ == "__main__":

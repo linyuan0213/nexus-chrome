@@ -1,4 +1,4 @@
-# Nexus Media Chrome Server - 架构设计文档
+# Nexus Chrome Server - 架构设计文档
 
 ## 概述
 

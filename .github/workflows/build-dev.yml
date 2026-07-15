@@ -1,4 +1,4 @@
-name: Nexus Media Chrome Docker Dev
+name: Nexus Chrome Docker Dev
 
 on:
   workflow_dispatch:
@@ -38,4 +38,4 @@ jobs:
             linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:latest-beta
+            ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:latest-beta

@@ -1,4 +1,4 @@
-# Nexus Media Chrome Service — task runner
+# Nexus Chrome Service — task runner
 # https://github.com/casey/just
 
 # 显示帮助（默认）

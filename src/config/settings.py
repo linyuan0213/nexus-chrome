@@ -374,6 +374,9 @@ CHROME_PATH = os.getenv("CHROME_PATH", _DEFAULT_CHROME)
 HEADLESS_MODE = os.getenv("HEADLESS_MODE", "")
 REMOTE_CHROME_ADDRESS = os.getenv("REMOTE_CHROME_ADDRESS", "")  # 如 127.0.0.1:9222
 BROWSER_MONITOR_INTERVAL = 10
+MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "100"))
+SESSION_TTL = int(os.getenv("SESSION_TTL", "3600"))
+SESSION_CLEANUP_INTERVAL = int(os.getenv("SESSION_CLEANUP_INTERVAL", "300"))
 def _read_version() -> str:
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     try:
@@ -384,7 +387,7 @@ def _read_version() -> str:
 
 
 APP_VERSION = os.getenv("APP_VERSION", _read_version())
-USER_DATA_PATH = os.getenv("USER_DATA_PATH", os.path.join(os.path.expanduser("~"), ".cache", "nexus-media-chrome", "user_data"))
+USER_DATA_PATH = os.getenv("USER_DATA_PATH", os.path.join(os.path.expanduser("~"), ".cache", "nexus-chrome", "user_data"))
 
 # HTTP 客户端配置
 HTTP_CLIENT_TIMEOUT = int(os.getenv("HTTP_CLIENT_TIMEOUT", "30"))

@@ -3,7 +3,8 @@
 # 如果未 patch，用 unshare bind mount 注入。
 # 用法: bash scripts/start_with_patched_gpu.sh
 
-PATCHED="/home/linyuan/python/nexus-media-chrome/patched_libs/libvk_swiftshader.so"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PATCHED="$PROJECT_ROOT/patched_libs/libvk_swiftshader.so"
 ORIGINAL="/opt/google/chrome/libvk_swiftshader.so"
 
 strings "$ORIGINAL" | grep -q "Intel Iris Pro" 2>/dev/null && {

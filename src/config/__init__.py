@@ -1,1 +1,1 @@
-"""Configuration module for Nexus Media Chrome Server."""
+"""Configuration module for Nexus Chrome Server."""

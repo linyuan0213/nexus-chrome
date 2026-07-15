@@ -1,4 +1,4 @@
-name: Nexus Media Chrome Docker
+name: Nexus Chrome Docker
 
 on:
   workflow_dispatch:
@@ -49,10 +49,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:latest
-            ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:${{ env.app_version }}
-            ghcr.io/${{ github.repository_owner }}/nexus-media-chrome:latest
-            ghcr.io/${{ github.repository_owner }}/nexus-media-chrome:${{ env.app_version }}
+            ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:latest
+            ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:${{ env.app_version }}
+            ghcr.io/${{ github.repository_owner }}/nexus-chrome:latest
+            ghcr.io/${{ github.repository_owner }}/nexus-chrome:${{ env.app_version }}
 
   release:
     runs-on: ubuntu-latest
@@ -71,7 +71,7 @@ jobs:
 
           CONTENT=$(awk '/^## v'"$VERSION"' /{flag=1;next}/^## v/{flag=0}flag' README.md)
           if [ -z "$CONTENT" ]; then
-            CONTENT="Nexus Media Chrome $GITHUB_REF_NAME 已发布。"
+            CONTENT="Nexus Chrome $GITHUB_REF_NAME 已发布。"
           fi
 
           {
@@ -83,7 +83,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: Nexus Media Chrome ${{ steps.extract.outputs.tag }}
+          name: Nexus Chrome ${{ steps.extract.outputs.tag }}
           body: ${{ steps.extract.outputs.notes }}
           generate_release_notes: false
         env:
@@ -95,13 +95,13 @@ jobs:
         run: |
           printf '%s\n' "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' > notes.txt
           {
-            echo '<b>Nexus Media Chrome ${{ steps.extract.outputs.tag }} 已发布</b>'
+            echo '<b>Nexus Chrome ${{ steps.extract.outputs.tag }} 已发布</b>'
             echo ''
             echo '<pre>'
             cat notes.txt
             echo '</pre>'
             echo ''
-            echo '📦 Docker: <code>docker pull ${{ secrets.DOCKER_USERNAME }}/nexus-media-chrome:${{ steps.extract.outputs.version }}</code>'
+            echo '📦 Docker: <code>docker pull ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:${{ steps.extract.outputs.version }}</code>'
             echo '🔗 <a href="https://github.com/${{ github.repository }}/releases/tag/${{ steps.extract.outputs.tag }}">查看 Release</a>'
           } > telegram_msg.txt
 

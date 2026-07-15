@@ -1,9 +1,9 @@
-# Nexus Media Chrome 服务器
+# Nexus Chrome 服务器
 
 ## 项目结构
 
 ```
-nexus-media-chrome/
+nexus-chrome/
 ├── src/                    # 源代码
 │   ├── __init__.py
 │   ├── main.py            # 主 FastAPI 应用
@@ -79,8 +79,8 @@ nexus-media-chrome/
 
 1. 克隆仓库：
 ```bash
-git clone https://github.com/linyuan0213/nexus-media-chrome.git
-cd nexus-media-chrome
+git clone https://github.com/linyuan0213/nexus-chrome.git
+cd nexus-chrome
 ```
 
 2. 使用 uv 安装依赖：
@@ -97,13 +97,13 @@ uv run uvicorn src.main:app --host 0.0.0.0 --port 9850
 
 1. 构建镜像：
 ```bash
-docker build -t nexus-media-chrome-novnc .
+docker build -t nexus-chrome-novnc .
 ```
 
 2. 运行容器：
 
 ```bash
-docker run --shm-size=2g -p 9850:9850 -p 6080:6080 -d nexus-media-chrome-novnc
+docker run --shm-size=2g -p 9850:9850 -p 6080:6080 -d nexus-chrome-novnc
 ```
 
 ### 网页 VNC 访问

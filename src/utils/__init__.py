@@ -1,1 +1,1 @@
-"""Utility functions for Nexus Media Chrome Server."""
+"""Utility functions for Nexus Chrome Server."""
