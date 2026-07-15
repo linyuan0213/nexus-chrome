@@ -1,6 +1,7 @@
 """Session + SessionManager — DrissionPage 4.2 兼容，手动 CookieStore 隔离。"""
 
 import json
+import time
 from typing import Any, Dict, List, Optional, cast
 from urllib.parse import urlparse
 
@@ -9,7 +10,12 @@ from DrissionPage._pages.chromium_tab import ChromiumTab
 from loguru import logger
 
 from src.challenge.resolver import ChallengeOrchestrator
-from src.config.settings import CHALLENGE_TIMEOUT, TURNSTILE_HOOK_JS
+from src.config.settings import (
+    CHALLENGE_TIMEOUT,
+    MAX_SESSIONS,
+    SESSION_TTL,
+    TURNSTILE_HOOK_JS,
+)
 from src.core.cookie_store import CookieStore
 from src.core.fingerprint import FingerprintManager
 
@@ -32,7 +38,16 @@ class Session:
         self._tabs: Dict[str, ChromiumTab] = {}
         self._active_tab_name: Optional[str] = None
         self._tab_counter = 0
+        self._last_used_at = time.monotonic()
         logger.info(f"[Session:{self.id}] 已创建 (fingerprint={fingerprint.profile_name})")
+
+    @property
+    def last_used_at(self) -> float:
+        return self._last_used_at
+
+    def touch(self) -> None:
+        """更新会话最后使用时间。"""
+        self._last_used_at = time.monotonic()
 
     def _auto_tab_name(self) -> str:
         self._tab_counter += 1
@@ -92,6 +107,11 @@ class Session:
                  cookie: Optional[str] = None, referer: Optional[str] = None,
                  timeout: int = CHALLENGE_TIMEOUT,
                  local_storage: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        self.touch()
+        if tab_name is None and self._active_tab_name is not None:
+            self.close_tab(self._active_tab_name)
+        elif tab_name is not None and tab_name in self._tabs:
+            self.close_tab(tab_name)
         tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer,
                                         local_storage=local_storage)
         orchestrator = ChallengeOrchestrator(timeout=timeout)
@@ -239,6 +259,7 @@ class Session:
         timeout: int,
     ) -> Dict[str, Any]:
         """非 GET 请求：先导航到同 origin 过盾，再用浏览器内 fetch 发送请求。"""
+        self.touch()
         domain = urlparse(url).netloc
         cookies = self._merge_cookies(domain, cookie)
         tab = self._create_fetch_tab(url, cookies=cookies)
@@ -246,73 +267,79 @@ class Session:
         self._tabs[name] = tab
         self._active_tab_name = name
 
-        tab.get(url)  # type: ignore[union-attr]
-        tab.wait(3)
+        try:
+            tab.get(url)  # type: ignore[union-attr]
+            tab.wait(3)
 
-        orchestrator = ChallengeOrchestrator(timeout=timeout)
-        challenge_result = orchestrator.resolve(tab)
+            orchestrator = ChallengeOrchestrator(timeout=timeout)
+            challenge_result = orchestrator.resolve(tab)
 
-        headers_json = json.dumps(headers or {})
-        body_str = data if isinstance(data, str) else json.dumps(data) if data is not None else ""
+            headers_json = json.dumps(headers or {})
+            body_str = data if isinstance(data, str) else json.dumps(data) if data is not None else ""
 
-        script = f"""
-        async () => {{
-            try {{
-                const response = await fetch({json.dumps(url)}, {{
-                    method: {json.dumps(method)},
-                    headers: {headers_json},
-                    body: {json.dumps(body_str)},
-                    credentials: 'include'
-                }});
-                const text = await response.text();
-                const headers = {{}};
-                response.headers.forEach((value, key) => {{ headers[key] = value; }});
-                return {{
-                    status: response.status,
-                    headers: headers,
-                    body: text,
-                    url: response.url
-                }};
-            }} catch (e) {{
-                return {{error: e.message}};
+            script = f"""
+            async () => {{
+                try {{
+                    const response = await fetch({json.dumps(url)}, {{
+                        method: {json.dumps(method)},
+                        headers: {headers_json},
+                        body: {json.dumps(body_str)},
+                        credentials: 'include'
+                    }});
+                    const text = await response.text();
+                    const headers = {{}};
+                    response.headers.forEach((value, key) => {{ headers[key] = value; }});
+                    return {{
+                        status: response.status,
+                        headers: headers,
+                        body: text,
+                        url: response.url
+                    }};
+                }} catch (e) {{
+                    return {{error: e.message}};
+                }}
             }}
-        }}
-        """
+            """
 
-        try:
-            tab_any: Any = tab
-            result: Any = tab_any.run_async_js(script, as_expr=False)
-        except Exception as e:
-            result = {"error": str(e)}
-
-        if not result:
-            result = {"error": "JS fetch did not return a result"}
-
-        result = cast(Dict[str, Any], result)
-        result_dict = cast(Dict[str, Any], result)
-
-        if "error" in result_dict:
-            raise RuntimeError(f"JS fetch failed: {result_dict.get('error')}")
-
-        try:
-            cookies = tab.cookies()
-            if cookies:
-                self._store_cookies(domain, cookies)
-        except Exception:
             try:
-                browser_any: Any = self._browser
-                result_cdp = cast(Dict[str, Any], browser_any._run_cdp("Storage.getCookies"))
-                self._store_cookies_from_cdp(domain, result_cdp.get("cookies", []))
-            except Exception:
-                logger.debug("fetch 后 CDP 获取 Cookies 失败，跳过")
+                tab_any: Any = tab
+                result: Any = tab_any.run_async_js(script, as_expr=False)
+            except Exception as e:
+                result = {"error": str(e)}
 
-        return {
-            "url": result_dict.get("url", tab.url),
-            "status_code": result_dict.get("status", 200),
-            "headers": result_dict.get("headers", {}),
-            "body": result_dict.get("body", ""),
-            "challenge": challenge_result,
-        }
+            if not result:
+                result = {"error": "JS fetch did not return a result"}
+
+            result = cast(Dict[str, Any], result)
+            result_dict = cast(Dict[str, Any], result)
+
+            if "error" in result_dict:
+                raise RuntimeError(f"JS fetch failed: {result_dict.get('error')}")
+
+            try:
+                cookies = tab.cookies()
+                if cookies:
+                    self._store_cookies(domain, cookies)
+            except Exception:
+                try:
+                    browser_any: Any = self._browser
+                    result_cdp = cast(Dict[str, Any], browser_any._run_cdp("Storage.getCookies"))
+                    self._store_cookies_from_cdp(domain, result_cdp.get("cookies", []))
+                except Exception:
+                    logger.debug("fetch 后 CDP 获取 Cookies 失败，跳过")
+
+            return {
+                "url": result_dict.get("url", tab.url),
+                "status_code": result_dict.get("status", 200),
+                "headers": result_dict.get("headers", {}),
+                "body": result_dict.get("body", ""),
+                "challenge": challenge_result,
+            }
+        finally:
+            try:
+                self.close_tab(name)
+            except Exception as e:
+                logger.debug(f"[Session:{self.id}] 关闭 fetch 标签页 {name} 失败: {e}")
 
     def browser_fetch(
         self,
@@ -335,23 +362,28 @@ class Session:
         return self._browser_fetch_js(url, cookie_header, method, headers, data, timeout)
 
     def get_html(self) -> Dict[str, Any]:
+        self.touch()
         tab = self._get_active_tab()
         return {"url": tab.url, "html": tab.html}
 
     def get_cookies(self, domain: Optional[str] = None) -> Dict[str, Any]:
+        self.touch()
         if domain:
             return {domain: self.cookie_store.as_dict(domain)}
         return self.cookie_store.as_full_dict()
 
     def click(self, selector: str) -> None:
+        self.touch()
         self._get_active_tab().ele(selector).click(by_js=None)  # type: ignore[union-attr]
 
     def input_text(self, selector: str, text: str) -> None:
+        self.touch()
         ele = self._get_active_tab().ele(selector)
         ele.clear()  # type: ignore[union-attr]
         ele.input(text)  # type: ignore[union-attr]
 
     def execute(self, script: str) -> Any:
+        self.touch()
         return self._get_active_tab().run_js(script)  # type: ignore[union-attr]
 
     def close_tab(self, tab_name: str) -> None:
@@ -360,7 +392,10 @@ class Session:
         tab = self._tabs.pop(tab_name)
         if self._active_tab_name == tab_name:
             self._active_tab_name = next(iter(self._tabs), None)
-        tab.close()
+        try:
+            tab.close()
+        except Exception as e:
+            logger.debug(f"[Session:{self.id}] 关闭标签页 {tab_name} 失败: {e}")
 
     def close_all_tabs(self) -> None:
         for name in list(self._tabs.keys()):
@@ -385,14 +420,23 @@ class Session:
 
 
 class SessionManager:
-    def __init__(self, browser: Chromium):
+    def __init__(self, browser: Chromium, max_sessions: int = MAX_SESSIONS,
+                 session_ttl: int = SESSION_TTL):
         self._browser = browser
         self._sessions: Dict[str, Session] = {}
+        self._max_sessions = max_sessions
+        self._session_ttl = session_ttl
 
     def create(self, session_id: str, fingerprint_profile: Optional[str] = None,
                user_agent: Optional[str] = None, proxy: Optional[str] = None) -> Session:
         if session_id in self._sessions:
             raise ValueError(f"会话 '{session_id}' 已存在")
+        if len(self._sessions) >= self._max_sessions:
+            oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used_at)
+            logger.warning(
+                f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}"
+            )
+            self.delete(oldest_id)
         fingerprint = FingerprintManager(fingerprint_profile)
         session = Session(
             session_id=session_id, browser=self._browser,
@@ -404,7 +448,9 @@ class SessionManager:
     def get(self, session_id: str) -> Session:
         if session_id not in self._sessions:
             raise ValueError(f"会话 '{session_id}' 未找到")
-        return self._sessions[session_id]
+        session = self._sessions[session_id]
+        session.touch()
+        return session
 
     def list_all(self) -> List[Dict[str, Any]]:
         return [s.to_dict() for s in self._sessions.values()]
@@ -417,6 +463,18 @@ class SessionManager:
     def delete_all(self) -> None:
         for sid in list(self._sessions.keys()):
             self.delete(sid)
+
+    def delete_expired(self, max_idle_seconds: Optional[int] = None) -> int:
+        """清理超过空闲时间的会话，返回清理数量。"""
+        threshold = max_idle_seconds if max_idle_seconds is not None else self._session_ttl
+        now = time.monotonic()
+        expired = [
+            sid for sid, s in self._sessions.items()
+            if now - s.last_used_at > threshold
+        ]
+        for sid in expired:
+            self.delete(sid)
+        return len(expired)
 
 
 session_manager: Optional[SessionManager] = None

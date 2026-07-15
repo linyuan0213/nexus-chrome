@@ -1,5 +1,6 @@
 """Session 模块单元测试 — 使用 mock 浏览器，无需真实 Chrome。"""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -164,3 +165,79 @@ class TestSessionClose:
         session.close_tab("tab_1")
         mock_tab.close.assert_called_once()
         assert session._active_tab_name is None
+
+
+class TestSessionManagerLimits:
+    def test_create_evicts_oldest_when_max_sessions_reached(self, mock_browser):
+        sm = SessionManager(mock_browser, max_sessions=2, session_ttl=3600)
+        sm.create("a")
+        sm.create("b")
+        assert len(sm.list_all()) == 2
+        sm.create("c")
+        assert len(sm.list_all()) == 2
+        assert "a" not in sm._sessions
+        assert "c" in sm._sessions
+
+    def test_delete_expired(self, mock_browser):
+        sm = SessionManager(mock_browser, max_sessions=10, session_ttl=0)
+        sm.create("a")
+        sm.create("b")
+        assert len(sm.list_all()) == 2
+        deleted = sm.delete_expired()
+        assert deleted == 2
+        assert len(sm.list_all()) == 0
+
+
+class TestSessionTabLifecycle:
+    def test_navigate_closes_previous_active_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+
+        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False, "type": "none", "solved": True, "duration_ms": 0
+            }
+            session.navigate("https://example.com/")
+            session.navigate("https://example.org/")
+
+        assert mock_tab.close.call_count == 1
+        assert len(session._tabs) == 1
+
+    def test_navigate_replaces_named_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+
+        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False, "type": "none", "solved": True, "duration_ms": 0
+            }
+            session.navigate("https://example.com/", tab_name="work")
+            session.navigate("https://example.org/", tab_name="work")
+
+        assert mock_tab.close.call_count == 1
+        assert "work" in session._tabs
+        assert len(session._tabs) == 1
+
+    def test_browser_fetch_closes_temp_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        tab_any: Any = mock_tab
+        tab_any.run_async_js.return_value = {
+            "status": 200,
+            "headers": {},
+            "body": "ok",
+            "url": "https://example.org/api",
+        }
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+
+        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False, "type": "none", "solved": True, "duration_ms": 0
+            }
+            result = session.browser_fetch(
+                "https://example.org/api", method="POST", data={"k": "v"}
+            )
+
+        assert result["status_code"] == 200
+        assert result["body"] == "ok"
+        assert mock_tab.close.call_count == 1
+        assert len(session._tabs) == 0
