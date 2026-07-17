@@ -167,6 +167,37 @@ curl -X POST http://localhost:9850/sessions/work/click \
 - `VNC_PASSWORD`: VNC 密码（默认：password，部署时必须修改）
 - `CHALLENGE_TIMEOUT`: 挑战等待超时（默认：30 秒）
 - `HTTP_CLIENT_TIMEOUT`: HTTP 客户端超时（默认：30 秒）
+- `USER_DATA_PATH`: Chrome 用户数据目录路径（默认：`~/.cache/nexus-chrome/user_data`）
+- `CLEANUP_ENABLED`: 是否启用用户数据目录定期清理（默认：`true`）
+- `CLEANUP_INTERVAL`: 清理间隔，单位秒（默认：3600）
+- `CLEANUP_MAX_SIZE_GB`: 超过该大小触发深度清理，单位 GB（默认：2，0 表示禁用）
+- `CLEANUP_MAX_AGE_SECONDS`: 仅删除超过该秒数的文件/目录（默认：0，表示不限制）
+- `CLEANUP_KEEP_COOKIES`: 清理时是否保留 Cookies 文件（默认：`true`）
+
+### 防止 `DeferredBrowserMetrics` 等目录无限增长
+
+Chrome 的 `--user-data-dir` 会不断写入缓存、IndexedDB、Local Storage、Metrics 等文件。如果你把该目录映射到宿主机（如 `-v /data:/data`），长期运行后可能出现 `DeferredBrowserMetrics` 目录占满磁盘。
+
+本项目内置了一个后台清理任务，配合以下环境变量工作：
+
+- **启动时清理**：服务启动前会清理一次缓存和 metrics 文件。
+- **后台定期清理**：`CLEANUP_ENABLED=true` 时，按 `CLEANUP_INTERVAL` 周期运行。
+- **阈值深度清理**：当目录超过 `CLEANUP_MAX_SIZE_GB` 时，触发深度清理，删除 `IndexedDB`、`Local Storage`、`Session Storage` 等。
+- **Chrome 启动参数优化**：限制磁盘缓存大小、关闭崩溃报告和组件自动更新等。
+
+推荐无持久化需求的 Docker 部署（数据在容器内，重启后自动清空）：
+
+```bash
+docker run --shm-size=2g \
+  -e VNC_PASSWORD=your_password \
+  -e USER_DATA_PATH=/tmp/nexus-chrome/user_data \
+  -e CLEANUP_ENABLED=true \
+  -e CLEANUP_MAX_SIZE_GB=2 \
+  -p 9850:9850 -p 6080:6080 \
+  -d nexus-chrome-novnc
+```
+
+如果你必须持久化用户数据到宿主机，只要保持 `CLEANUP_ENABLED=true`，后台任务会自动控制目录大小。
 
 ## 开发
 
