@@ -4,7 +4,7 @@ import os
 import platform
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _IS_WINDOWS = platform.system() == "Windows"
 _DEFAULT_CHROME = (
@@ -388,6 +388,21 @@ def _read_version() -> str:
 
 APP_VERSION = os.getenv("APP_VERSION", _read_version())
 USER_DATA_PATH = os.getenv("USER_DATA_PATH", os.path.join(os.path.expanduser("~"), ".cache", "nexus-chrome", "user_data"))
+
+
+def _parse_bool(value: Optional[str], default: bool) -> bool:
+    """把环境变量字符串解析为布尔值。"""
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+# 用户数据目录清理配置
+CLEANUP_ENABLED = _parse_bool(os.getenv("CLEANUP_ENABLED"), True)
+CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", "3600"))
+CLEANUP_MAX_SIZE_GB = float(os.getenv("CLEANUP_MAX_SIZE_GB", "2.0"))
+CLEANUP_MAX_AGE_SECONDS = int(os.getenv("CLEANUP_MAX_AGE_SECONDS", "0"))
+CLEANUP_KEEP_COOKIES = _parse_bool(os.getenv("CLEANUP_KEEP_COOKIES"), True)
 
 # HTTP 客户端配置
 HTTP_CLIENT_TIMEOUT = int(os.getenv("HTTP_CLIENT_TIMEOUT", "30"))

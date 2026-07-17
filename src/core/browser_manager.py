@@ -56,13 +56,27 @@ def _build_chrome_args(profile_name: Optional[str] = None) -> List[str]:
         "--metrics-recording-only",
         "--password-store=basic",
         "--disable-component-extensions-with-background-pages",
+        "--disable-component-update",
+        "--disable-breakpad",
+        "--disk-cache-dir=/tmp/nexus-chrome-cache",
+        "--disk-cache-size=536870912",
+        "--media-cache-size=536870912",
         "--lang=zh-CN",
         "--accept-lang=zh-CN,zh,en-US,en",
     ])
     args.extend(fp.get_browser_args())
-    disable_features = fp.get_disable_features()
+    disable_features = set(fp.get_disable_features())
+    disable_features.update([
+        "OptimizationHints",
+        "NetworkPrediction",
+        "OfflinePagesPrefetching",
+        "InterestFeedContentSuggestions",
+        "MediaRouter",
+        "AutofillServerCommunication",
+        "Translate",
+    ])
     if disable_features:
-        args.append(f"--disable-features={','.join(disable_features)}")
+        args.append(f"--disable-features={','.join(sorted(disable_features))}")
     return args
 
 
