@@ -66,11 +66,9 @@ class Session:
         tab = self._browser.new_tab()
         tab.set.load_mode.none()  # type: ignore[union-attr]
 
-        init_js = self.fingerprint.get_init_js()
-        if init_js:
-            tab.add_init_js(init_js)
-        if TURNSTILE_HOOK_JS:
-            tab.add_init_js(TURNSTILE_HOOK_JS)
+        # init_js = self.fingerprint.get_init_js()
+        # if init_js:
+        #     tab.add_init_js(init_js)
 
         if self._user_agent:
             tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
@@ -208,11 +206,9 @@ class Session:
         tab = self._browser.new_tab()
         tab.set.load_mode.none()  # type: ignore[union-attr]
 
-        init_js = self.fingerprint.get_init_js()
-        if init_js:
-            tab.add_init_js(init_js)
-        if TURNSTILE_HOOK_JS:
-            tab.add_init_js(TURNSTILE_HOOK_JS)
+        # init_js = self.fingerprint.get_init_js()
+        # if init_js:
+        #     tab.add_init_js(init_js)
 
         if self._user_agent:
             tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
