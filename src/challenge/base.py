@@ -18,8 +18,7 @@ class ChallengeResolver(ABC):
 
     @property
     @abstractmethod
-    def challenge_type(self) -> str:
-        ...
+    def challenge_type(self) -> str: ...
 
     def verify(self, tab: "ChromiumTab") -> bool:
         try:

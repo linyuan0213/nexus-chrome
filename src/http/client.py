@@ -31,9 +31,7 @@ class HttpClient:
             cookie_header = cookie_store.as_header(domain)
             if cookie_header:
                 existing = merged_headers.get("Cookie", "")
-                merged_headers["Cookie"] = (
-                    f"{existing}; {cookie_header}" if existing else cookie_header
-                )
+                merged_headers["Cookie"] = f"{existing}; {cookie_header}" if existing else cookie_header
                 used_cookies = list(cookie_store.as_dict(domain).keys())
 
         if timeout is None:
@@ -85,12 +83,14 @@ class HttpClient:
         cookies: List[Dict[str, str]] = []
         for key in cookie.keys():
             morsel = cookie[key]
-            cookies.append({
-                "name": morsel.key,
-                "value": morsel.value,
-                "domain": morsel.get("domain") or domain,
-                "path": morsel.get("path") or "/",
-            })
+            cookies.append(
+                {
+                    "name": morsel.key,
+                    "value": morsel.value,
+                    "domain": morsel.get("domain") or domain,
+                    "path": morsel.get("path") or "/",
+                }
+            )
         if cookies:
             cookie_store.store(domain, cookies)
             logger.debug(f"HTTP 响应写回 {len(cookies)} 个 Cookie 到 {domain}")

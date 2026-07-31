@@ -53,64 +53,78 @@ class Session:
         return f"tab_{self._tab_counter}"
 
     def _create_tab_internal(
-        self, url: str, tab_name: Optional[str] = None,
-        cookie: Optional[str] = None, referer: Optional[str] = None,
+        self,
+        url: str,
+        tab_name: Optional[str] = None,
+        cookie: Optional[str] = None,
+        referer: Optional[str] = None,
         local_storage: Optional[Dict[str, str]] = None,
     ) -> ChromiumTab:
         name = tab_name or self._auto_tab_name()
         if name in self._tabs:
             raise ValueError(f"标签页 '{name}' 已存在")
 
-        # 先创建空白标签页，注入指纹 JS 后再导航，确保首次加载也带伪装
         tab = self._browser.new_tab()
-        tab.set.load_mode.none()  # type: ignore[union-attr]
+        try:
+            tab.set.load_mode.none()  # type: ignore[union-attr]
+            if self._user_agent:
+                tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
+            if cookie:
+                cookies = self._parse_cookie_header(cookie)
+                domain = urlparse(url).netloc
+                for c in cookies:
+                    c.setdefault("domain", domain)
+                    c.setdefault("path", "/")
+                tab.set.cookies(cookies)  # type: ignore[union-attr]
+            if referer:
+                tab.set.headers({"Referer": referer})  # type: ignore[union-attr]
+            if local_storage:
+                try:
+                    for key, value in local_storage.items():
+                        escaped_key = key.replace("'", "\\'")
+                        escaped_value = value.replace("'", "\\'")
+                        tab.run_js(f"localStorage.setItem('{escaped_key}', '{escaped_value}')")  # type: ignore[union-attr]
+                except Exception as e:
+                    logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
+            if self._proxy:
+                try:
+                    tab.set.proxy(self._proxy)  # type: ignore[union-attr]
+                except Exception as e:
+                    logger.warning(f"[Session:{self.id}] 设置标签页代理失败: {e}")
 
-        # init_js = self.fingerprint.get_init_js()
-        # if init_js:
-        #     tab.add_init_js(init_js)
-
-        if self._user_agent:
-            tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
-        if cookie:
-            cookies = self._parse_cookie_header(cookie)
-            domain = urlparse(url).netloc
-            for c in cookies:
-                c.setdefault("domain", domain)
-                c.setdefault("path", "/")
-            tab.set.cookies(cookies)  # type: ignore[union-attr]
-        if referer:
-            tab.set.headers({"Referer": referer})  # type: ignore[union-attr]
-        if local_storage:
+            tab.get(url)  # type: ignore[union-attr]
+            tab.wait(3)
+        except Exception:
+            # 导航/初始化失败：关闭已创建的标签页，避免孤儿页面残留
             try:
-                for key, value in local_storage.items():
-                    escaped_key = key.replace("'", "\\'")
-                    escaped_value = value.replace("'", "\\'")
-                    tab.run_js(f"localStorage.setItem('{escaped_key}', '{escaped_value}')")  # type: ignore[union-attr]
-            except Exception as e:
-                logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
-        if self._proxy:
-            try:
-                tab.set.proxy(self._proxy)  # type: ignore[union-attr]
-            except Exception as e:
-                logger.warning(f"[Session:{self.id}] 设置标签页代理失败: {e}")
+                tab.close()
+            except Exception:
+                try:
+                    target_id = getattr(tab, "tab_id", None) or tab._target_id
+                    self._browser._run_cdp("Target.CloseTarget", {"targetId": target_id})  # type: ignore[union-attr]
+                except Exception:
+                    logger.warning(f"[Session:{self.id}] 清理初始化失败的标签页失败，可能已孤儿")
+            raise
 
-        tab.get(url)  # type: ignore[union-attr]
-        tab.wait(3)
         self._tabs[name] = tab
         self._active_tab_name = name
         return tab
 
-    def navigate(self, url: str, tab_name: Optional[str] = None,
-                 cookie: Optional[str] = None, referer: Optional[str] = None,
-                 timeout: int = CHALLENGE_TIMEOUT,
-                 local_storage: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    def navigate(
+        self,
+        url: str,
+        tab_name: Optional[str] = None,
+        cookie: Optional[str] = None,
+        referer: Optional[str] = None,
+        timeout: int = CHALLENGE_TIMEOUT,
+        local_storage: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         self.touch()
         if tab_name is None and self._active_tab_name is not None:
             self.close_tab(self._active_tab_name)
         elif tab_name is not None and tab_name in self._tabs:
             self.close_tab(tab_name)
-        tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer,
-                                        local_storage=local_storage)
+        tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer, local_storage=local_storage)
         orchestrator = ChallengeOrchestrator(timeout=timeout)
         challenge_result = orchestrator.resolve(tab)
         domain = urlparse(url).netloc
@@ -137,7 +151,9 @@ class Session:
             logger.debug("读取页面 URL/标题失败，使用原始 URL")
 
         return {
-            "url": page_url, "title": page_title, "html": html,
+            "url": page_url,
+            "title": page_title,
+            "html": html,
             "cookies": self.cookie_store.as_dict(domain),
             "cookie_header": self.cookie_store.as_header(domain),
             "challenge": challenge_result,
@@ -145,21 +161,31 @@ class Session:
 
     def _store_cookies(self, domain: str, cookies: List[Dict[str, str]]) -> None:
         for c in cookies:
-            self.cookie_store.store(domain, [{
-                "name": c.get("name", ""),
-                "value": c.get("value", ""),
-                "domain": c.get("domain", domain),
-                "path": c.get("path", "/"),
-            }])
+            self.cookie_store.store(
+                domain,
+                [
+                    {
+                        "name": c.get("name", ""),
+                        "value": c.get("value", ""),
+                        "domain": c.get("domain", domain),
+                        "path": c.get("path", "/"),
+                    }
+                ],
+            )
 
     def _store_cookies_from_cdp(self, domain: str, cookies: List[Dict[str, str]]) -> None:
         for c in cookies:
-            self.cookie_store.store(domain, [{
-                "name": c.get("name", ""),
-                "value": c.get("value", ""),
-                "domain": c.get("domain", domain),
-                "path": c.get("path", "/"),
-            }])
+            self.cookie_store.store(
+                domain,
+                [
+                    {
+                        "name": c.get("name", ""),
+                        "value": c.get("value", ""),
+                        "domain": c.get("domain", domain),
+                        "path": c.get("path", "/"),
+                    }
+                ],
+            )
 
     @staticmethod
     def _parse_cookie_header(cookie_str: str) -> List[Dict[str, str]]:
@@ -242,7 +268,6 @@ class Session:
             "body": nav_result.get("html", ""),
             "challenge": nav_result.get("challenge"),
         }
-
 
     def _browser_fetch_js(
         self,
@@ -414,34 +439,41 @@ class Session:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id, "fingerprint": self.fingerprint.profile_name,
-            "tabs": list(self._tabs.keys()), "active_tab": self._active_tab_name,
+            "id": self.id,
+            "fingerprint": self.fingerprint.profile_name,
+            "tabs": list(self._tabs.keys()),
+            "active_tab": self._active_tab_name,
             "cookie_domains": self.cookie_store.list_domains(),
         }
 
 
 class SessionManager:
-    def __init__(self, browser: Chromium, max_sessions: int = MAX_SESSIONS,
-                 session_ttl: int = SESSION_TTL):
+    def __init__(self, browser: Chromium, max_sessions: int = MAX_SESSIONS, session_ttl: int = SESSION_TTL):
         self._browser = browser
         self._sessions: Dict[str, Session] = {}
         self._max_sessions = max_sessions
         self._session_ttl = session_ttl
 
-    def create(self, session_id: str, fingerprint_profile: Optional[str] = None,
-               user_agent: Optional[str] = None, proxy: Optional[str] = None) -> Session:
+    def create(
+        self,
+        session_id: str,
+        fingerprint_profile: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        proxy: Optional[str] = None,
+    ) -> Session:
         if session_id in self._sessions:
             raise ValueError(f"会话 '{session_id}' 已存在")
         if len(self._sessions) >= self._max_sessions:
             oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used_at)
-            logger.warning(
-                f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}"
-            )
+            logger.warning(f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}")
             self.delete(oldest_id)
         fingerprint = FingerprintManager(fingerprint_profile)
         session = Session(
-            session_id=session_id, browser=self._browser,
-            fingerprint=fingerprint, user_agent=user_agent, proxy=proxy,
+            session_id=session_id,
+            browser=self._browser,
+            fingerprint=fingerprint,
+            user_agent=user_agent,
+            proxy=proxy,
         )
         self._sessions[session_id] = session
         return session
@@ -469,10 +501,7 @@ class SessionManager:
         """清理超过空闲时间的会话，返回清理数量。"""
         threshold = max_idle_seconds if max_idle_seconds is not None else self._session_ttl
         now = time.monotonic()
-        expired = [
-            sid for sid, s in self._sessions.items()
-            if now - s.last_used_at > threshold
-        ]
+        expired = [sid for sid, s in self._sessions.items() if now - s.last_used_at > threshold]
         for sid in expired:
             self.delete(sid)
         return len(expired)

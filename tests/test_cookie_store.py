@@ -36,10 +36,13 @@ class TestCookieStore:
 
     def test_as_header(self):
         store = CookieStore()
-        store.store("example.com", [
-            {"name": "a", "value": "1"},
-            {"name": "b", "value": "2"},
-        ])
+        store.store(
+            "example.com",
+            [
+                {"name": "a", "value": "1"},
+                {"name": "b", "value": "2"},
+            ],
+        )
         header = store.as_header("example.com")
         assert "a=1" in header
         assert "b=2" in header
@@ -50,10 +53,13 @@ class TestCookieStore:
 
     def test_as_dict(self):
         store = CookieStore()
-        store.store("example.com", [
-            {"name": "a", "value": "1"},
-            {"name": "b", "value": "2"},
-        ])
+        store.store(
+            "example.com",
+            [
+                {"name": "a", "value": "1"},
+                {"name": "b", "value": "2"},
+            ],
+        )
         result = store.as_dict("example.com")
         assert result == {"a": "1", "b": "2"}
 

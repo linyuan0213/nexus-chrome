@@ -1,11 +1,24 @@
 """指纹管理器 — 预置 3 种 profile，支持自定义扩展。"""
 
+import re
 from typing import Any, Dict, List, Optional
 
 from src.config.settings import (
     DEFAULT_FINGERPRINT_PROFILE,
     FINGERPRINT_PROFILES,
 )
+
+# 兜底版本（当无法从 User-Agent 解析出真实 Chrome 版本时使用）
+_FALLBACK_BRAND_VERSION = "149"
+_FALLBACK_FULL_VERSION = "149.0.7827.53"
+
+
+def _extract_chrome_version(user_agent: str) -> str:
+    """从 User-Agent 提取完整 Chrome 版本号，如 '149.0.7827.53'。"""
+    m = re.search(r"Chrome/(\d+)\.(\d+)\.(\d+)\.(\d+)", user_agent)
+    if not m:
+        return _FALLBACK_FULL_VERSION
+    return ".".join(m.groups())
 
 
 class FingerprintManager:
@@ -22,8 +35,16 @@ class FingerprintManager:
     def config(self) -> Dict[str, Any]:
         return self._config
 
-    def get_init_js(self) -> str:
-        scripts = self._config.get("js_scripts", [])
+    def get_init_js(self, user_agent: Optional[str] = None) -> str:
+        """构造注入脚本；传入真实 User-Agent 时会让 Chrome 版本号与浏览器一致。"""
+        full_version = _extract_chrome_version(user_agent or "")
+        major_version = full_version.split(".", 1)[0]
+        scripts: List[str] = []
+        for raw in self._config.get("js_scripts", []):
+            script = str(raw)
+            script = script.replace("__CHROME_BRAND__", major_version)
+            script = script.replace("__CHROME_FULL__", full_version)
+            scripts.append(script)
         return "\n".join(scripts)
 
     def get_browser_args(self) -> List[str]:

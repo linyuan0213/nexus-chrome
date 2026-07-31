@@ -19,10 +19,13 @@ class TestHttpClient:
 
     def test_fetch_injects_cookies(self):
         store = CookieStore()
-        store.store("example.com", [
-            {"name": "session", "value": "abc123"},
-            {"name": "token", "value": "xyz789"},
-        ])
+        store.store(
+            "example.com",
+            [
+                {"name": "session", "value": "abc123"},
+                {"name": "token", "value": "xyz789"},
+            ],
+        )
 
         mock_response = MagicMock()
         mock_response.url = "https://example.com/api"
@@ -58,9 +61,7 @@ class TestHttpClient:
     def test_fetch_error_handling(self):
         client = HttpClient(base_timeout=5)
         with patch("httpx.Client") as mock_client:
-            mock_client.return_value.__enter__.return_value.request.side_effect = Exception(
-                "Connection refused"
-            )
+            mock_client.return_value.__enter__.return_value.request.side_effect = Exception("Connection refused")
             result = client.fetch("https://invalid.example.com/")
             assert result["status_code"] == -1
             assert result["error"] == "Connection refused"

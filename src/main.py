@@ -45,9 +45,7 @@ async def _profile_cleanup_loop():
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL)
         try:
-            result = await asyncio.to_thread(
-                cleanup_user_data_dir, USER_DATA_PATH, CLEANUP_KEEP_COOKIES
-            )
+            result = await asyncio.to_thread(cleanup_user_data_dir, USER_DATA_PATH, CLEANUP_KEEP_COOKIES)
             if result["removed"]:
                 logger.info(
                     f"用户数据目录清理完成: 删除 {result['removed']} 项, "
@@ -55,16 +53,11 @@ async def _profile_cleanup_loop():
                 )
             total_size = await asyncio.to_thread(get_directory_size, Path(USER_DATA_PATH))
             if CLEANUP_MAX_SIZE_GB > 0 and total_size > CLEANUP_MAX_SIZE_GB * 1024**3:
-                logger.warning(
-                    f"用户数据目录仍超过 {CLEANUP_MAX_SIZE_GB} GB, 执行深度清理"
-                )
+                logger.warning(f"用户数据目录仍超过 {CLEANUP_MAX_SIZE_GB} GB, 执行深度清理")
                 deep = await asyncio.to_thread(
                     cleanup_user_data_dir, USER_DATA_PATH, CLEANUP_KEEP_COOKIES, aggressive=True
                 )
-                logger.info(
-                    f"深度清理完成: 删除 {deep['removed']} 项, "
-                    f"释放 {deep['bytes_freed'] / 1024 / 1024:.2f} MB"
-                )
+                logger.info(f"深度清理完成: 删除 {deep['removed']} 项, 释放 {deep['bytes_freed'] / 1024 / 1024:.2f} MB")
         except Exception as e:
             logger.warning(f"用户数据目录清理失败: {e}")
 
@@ -78,9 +71,7 @@ async def lifespan(app: FastAPI):
     if CLEANUP_ENABLED:
         # 启动前清理一次，避免容器重启后旧数据继承导致暴涨
         try:
-            result = await asyncio.to_thread(
-                cleanup_user_data_dir, USER_DATA_PATH, CLEANUP_KEEP_COOKIES
-            )
+            result = await asyncio.to_thread(cleanup_user_data_dir, USER_DATA_PATH, CLEANUP_KEEP_COOKIES)
             if result["removed"]:
                 logger.info(
                     f"启动前用户数据清理: 删除 {result['removed']} 项, "

@@ -18,8 +18,11 @@ def mock_session_manager():
     sm = MagicMock()
     session = MagicMock()
     session.to_dict.return_value = {
-        "id": "work", "fingerprint": "stealth",
-        "tabs": [], "active_tab": None, "cookie_domains": [],
+        "id": "work",
+        "fingerprint": "stealth",
+        "tabs": [],
+        "active_tab": None,
+        "cookie_domains": [],
     }
     session.cookie_store = MagicMock()
     session.cookie_store.as_dict.return_value = {"session_id": "abc123"}
@@ -40,12 +43,15 @@ class TestCreateSession:
     def test_create_session(self, client, mock_session_manager):
         sm, _ = mock_session_manager
         with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
-            response = client.post("/sessions", json={
-                "session_id": "work",
-                "fingerprint_profile": "stealth",
-                "user_agent": "Mozilla/5.0",
-                "proxy": "http://proxy:8080",
-            })
+            response = client.post(
+                "/sessions",
+                json={
+                    "session_id": "work",
+                    "fingerprint_profile": "stealth",
+                    "user_agent": "Mozilla/5.0",
+                    "proxy": "http://proxy:8080",
+                },
+            )
         assert response.status_code == 200
         data = response.json()
         assert data["code"] == 0
@@ -93,8 +99,11 @@ class TestNavigate:
     def test_navigate(self, client, mock_session_manager):
         sm, session = mock_session_manager
         session.navigate.return_value = {
-            "url": "https://example.com/", "title": "Example", "html": "<html>",
-            "cookies": {"session_id": "abc123"}, "cookie_header": "session_id=abc123",
+            "url": "https://example.com/",
+            "title": "Example",
+            "html": "<html>",
+            "cookies": {"session_id": "abc123"},
+            "cookie_header": "session_id=abc123",
             "challenge": {"detected": False, "type": "none", "solved": True, "duration_ms": 0},
         }
         with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
@@ -111,13 +120,22 @@ class TestFetch:
         with patch("src.api.routes.HttpClient") as MockClient:
             instance = MockClient.return_value
             instance.fetch.return_value = {
-                "url": "https://example.com/api", "status_code": 200,
-                "headers": {}, "body": "{}", "cookies_used": ["session_id"],
+                "url": "https://example.com/api",
+                "status_code": 200,
+                "headers": {},
+                "body": "{}",
+                "cookies_used": ["session_id"],
             }
             with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
-                response = client.post("/sessions/work/fetch", json={
-                    "url": "https://example.com/api", "method": "GET", "headers": {}, "data": None,
-                })
+                response = client.post(
+                    "/sessions/work/fetch",
+                    json={
+                        "url": "https://example.com/api",
+                        "method": "GET",
+                        "headers": {},
+                        "data": None,
+                    },
+                )
         assert response.status_code == 200
         data = response.json()
         assert data["code"] == 0
@@ -145,17 +163,18 @@ class TestRequest:
                 "body": "<html>ok</html>",
                 "challenge": {"detected": True, "type": "cloudflare", "solved": True},
             }
-            with patch("src.api.routes.session_manager", sm), patch(
-                "src.api.routes._get_sm", return_value=sm
-            ):
-                response = client.post("/sessions/work/request", json={
-                    "url": "https://example.com/",
-                    "method": "GET",
-                    "navigate_if_challenge": True,
-                    "browser_fetch_on_challenge": True,
-                    "return_html": False,
-                    "timeout": 30,
-                })
+            with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
+                response = client.post(
+                    "/sessions/work/request",
+                    json={
+                        "url": "https://example.com/",
+                        "method": "GET",
+                        "navigate_if_challenge": True,
+                        "browser_fetch_on_challenge": True,
+                        "return_html": False,
+                        "timeout": 30,
+                    },
+                )
         assert response.status_code == 200
         data = response.json()
         assert data["code"] == 0
@@ -173,17 +192,18 @@ class TestRequest:
                 "headers": {},
                 "body": "Just a moment...",
             }
-            with patch("src.api.routes.session_manager", sm), patch(
-                "src.api.routes._get_sm", return_value=sm
-            ):
-                response = client.post("/sessions/work/request", json={
-                    "url": "https://example.com/",
-                    "method": "GET",
-                    "navigate_if_challenge": False,
-                    "browser_fetch_on_challenge": False,
-                    "return_html": False,
-                    "timeout": 30,
-                })
+            with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
+                response = client.post(
+                    "/sessions/work/request",
+                    json={
+                        "url": "https://example.com/",
+                        "method": "GET",
+                        "navigate_if_challenge": False,
+                        "browser_fetch_on_challenge": False,
+                        "return_html": False,
+                        "timeout": 30,
+                    },
+                )
         assert response.status_code == 200
         data = response.json()
         assert data["code"] == 0
