@@ -14,6 +14,7 @@ from loguru import logger
 from src.config.settings import (
     BROWSER_MONITOR_INTERVAL,
     CHROME_PATH,
+    CHROME_RENDER_MODE,
     DEFAULT_FINGERPRINT_PROFILE,
     HEADLESS_MODE,
     REMOTE_CHROME_ADDRESS,
@@ -32,48 +33,58 @@ def _build_chrome_args(profile_name: Optional[str] = None) -> List[str]:
     args: List[str] = []
     if HEADLESS_MODE:
         args.append(HEADLESS_MODE)
-    args.extend([
-        f"--user-data-dir={USER_DATA_PATH}",
-        "--no-sandbox",
-        "--no-zygote",
-        "--disable-dev-shm-usage",
-        "--disable-setuid-sandbox",
-        f"--remote-debugging-port={DEBUG_PORT}",
-        "--window-size=1920,1080",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--use-angle=swiftshader-webgl",
-        "--use-gl=swiftshader-webgl",
-        "--no-first-run",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-hang-monitor",
-        "--disable-popup-blocking",
-        "--disable-prompt-on-repost",
-        "--disable-sync",
-        "--metrics-recording-only",
-        "--password-store=basic",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-component-update",
-        "--disable-breakpad",
-        "--disk-cache-dir=/tmp/nexus-chrome-cache",
-        "--disk-cache-size=536870912",
-        "--media-cache-size=536870912",
-        "--lang=zh-CN",
-        "--accept-lang=zh-CN,zh,en-US,en",
-    ])
+    args.extend(
+        [
+            f"--user-data-dir={USER_DATA_PATH}",
+            "--no-sandbox",
+            "--no-zygote",
+            "--disable-dev-shm-usage",
+            "--disable-setuid-sandbox",
+            f"--remote-debugging-port={DEBUG_PORT}",
+            "--window-size=1920,1080",
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-hang-monitor",
+            "--disable-popup-blocking",
+            "--disable-prompt-on-repost",
+            "--disable-sync",
+            "--metrics-recording-only",
+            "--password-store=basic",
+            "--disable-component-extensions-with-background-pages",
+            "--disable-component-update",
+            "--disable-breakpad",
+            "--disk-cache-dir=/tmp/nexus-chrome-cache",
+            "--disk-cache-size=536870912",
+            "--media-cache-size=536870912",
+            "--lang=zh-CN",
+            "--accept-lang=zh-CN,zh,en-US,en",
+        ]
+    )
+    if CHROME_RENDER_MODE == "swiftshader":
+        # 显式使用 SwiftShader 软件渲染（WebGL 由 patched lib 伪装为 Intel Iris Pro）
+        args.extend(
+            [
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--use-angle=swiftshader-webgl",
+                "--use-gl=swiftshader-webgl",
+            ]
+        )
     args.extend(fp.get_browser_args())
     disable_features = set(fp.get_disable_features())
-    disable_features.update([
-        "OptimizationHints",
-        "NetworkPrediction",
-        "OfflinePagesPrefetching",
-        "InterestFeedContentSuggestions",
-        "MediaRouter",
-        "AutofillServerCommunication",
-        "Translate",
-    ])
+    disable_features.update(
+        [
+            "OptimizationHints",
+            "NetworkPrediction",
+            "OfflinePagesPrefetching",
+            "InterestFeedContentSuggestions",
+            "MediaRouter",
+            "AutofillServerCommunication",
+            "Translate",
+        ]
+    )
     if disable_features:
         args.append(f"--disable-features={','.join(sorted(disable_features))}")
     return args
@@ -127,7 +138,8 @@ class BrowserManager:
             logger.debug("Xvfb 进程检测失败，准备启动新实例")
         self._xvfb_proc = subprocess.Popen(
             ["Xvfb", XVFB_DISPLAY, "-screen", "0", "1920x1080x24", "-ac"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         os.environ["DISPLAY"] = XVFB_DISPLAY
         _wait_for_xvfb_socket(timeout=10)

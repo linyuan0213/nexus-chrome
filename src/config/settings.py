@@ -8,9 +8,7 @@ from typing import Any, Dict, List, Optional
 
 _IS_WINDOWS = platform.system() == "Windows"
 _DEFAULT_CHROME = (
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-    if _IS_WINDOWS
-    else "/opt/google/chrome/google-chrome"
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" if _IS_WINDOWS else "/opt/google/chrome/google-chrome"
 )
 
 # ============================================================
@@ -178,8 +176,8 @@ FINGERPRINT_STEALTH_JS = """
         Object.defineProperty(navigator, 'userAgentData', {
             get: () => ({
                 brands: [
-                    {brand:'Google Chrome',version:'149'},
-                    {brand:'Chromium',version:'149'},
+                    {brand:'Google Chrome',version:'__CHROME_BRAND__'},
+                    {brand:'Chromium',version:'__CHROME_BRAND__'},
                     {brand:'Not=A?Brand',version:'24'}
                 ],
                 mobile: false,
@@ -190,11 +188,11 @@ FINGERPRINT_STEALTH_JS = """
                         platformVersion: '6.8.0',
                         architecture: 'x64',
                         model: '',
-                        uaFullVersion: '149.0.7827.53',
+                        uaFullVersion: '__CHROME_FULL__',
                         bitness: '64',
                         fullVersionList: [
-                            {brand:'Google Chrome',version:'149.0.7827.53'},
-                            {brand:'Chromium',version:'149.0.7827.53'},
+                            {brand:'Google Chrome',version:'__CHROME_FULL__'},
+                            {brand:'Chromium',version:'__CHROME_FULL__'},
                             {brand:'Not=A?Brand',version:'24.0.0.0'}
                         ]
                     };
@@ -250,9 +248,7 @@ CHALLENGE_SELECTORS: List[str] = [
     "div.vc div.text-box h2",
 ]
 
-CHALLENGE_BOX_SELECTORS: List[str] = [
-    'input[name="cf-turnstile-response"]'
-]
+CHALLENGE_BOX_SELECTORS: List[str] = ['input[name="cf-turnstile-response"]']
 
 # Cloudflare 专用
 CF_CHALLENGE_SELECTORS: List[str] = CHALLENGE_SELECTORS
@@ -377,6 +373,8 @@ BROWSER_MONITOR_INTERVAL = 10
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "100"))
 SESSION_TTL = int(os.getenv("SESSION_TTL", "3600"))
 SESSION_CLEANUP_INTERVAL = int(os.getenv("SESSION_CLEANUP_INTERVAL", "300"))
+
+
 def _read_version() -> str:
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     try:
@@ -387,7 +385,9 @@ def _read_version() -> str:
 
 
 APP_VERSION = os.getenv("APP_VERSION", _read_version())
-USER_DATA_PATH = os.getenv("USER_DATA_PATH", os.path.join(os.path.expanduser("~"), ".cache", "nexus-chrome", "user_data"))
+USER_DATA_PATH = os.getenv(
+    "USER_DATA_PATH", os.path.join(os.path.expanduser("~"), ".cache", "nexus-chrome", "user_data")
+)
 
 
 def _parse_bool(value: Optional[str], default: bool) -> bool:
@@ -403,6 +403,9 @@ CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", "3600"))
 CLEANUP_MAX_SIZE_GB = float(os.getenv("CLEANUP_MAX_SIZE_GB", "2.0"))
 CLEANUP_MAX_AGE_SECONDS = int(os.getenv("CLEANUP_MAX_AGE_SECONDS", "0"))
 CLEANUP_KEEP_COOKIES = _parse_bool(os.getenv("CLEANUP_KEEP_COOKIES"), True)
+
+# Chrome 渲染模式：auto=由 Chrome 自动选择(去掉软件渲染参数)；swiftshader=使用 SwiftShader 软件渲染
+CHROME_RENDER_MODE = os.getenv("CHROME_RENDER_MODE", "auto").strip().lower()
 
 # HTTP 客户端配置
 HTTP_CLIENT_TIMEOUT = int(os.getenv("HTTP_CLIENT_TIMEOUT", "30"))

@@ -56,7 +56,6 @@ class RequestOperation(BaseModel):
     timeout: int = Field(30, description="导航/请求超时秒数")
 
 
-
 class CookiesQuery(BaseModel):
     domain: Optional[str] = Field(None, description="按域名过滤")
 

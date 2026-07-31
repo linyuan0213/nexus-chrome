@@ -50,7 +50,9 @@ class TestResolverTimeout:
 
     def test_generic_respects_timeout(self):
         tab = MagicMock()
-        tab.html = "<html><head><title>Access denied</title></head><body><div class='challenge-container'></div></body></html>"
+        tab.html = (
+            "<html><head><title>Access denied</title></head><body><div class='challenge-container'></div></body></html>"
+        )
         resolver = GenericResolver()
         start = time.monotonic()
         result = resolver.resolve(tab, timeout=2)
