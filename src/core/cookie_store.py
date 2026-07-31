@@ -38,7 +38,7 @@ class CookieStore:
 
     def as_header(self, domain: str) -> str:
         cookies = self.get(domain)
-        return "; ".join(f'{c["name"]}={c["value"]}' for c in cookies if c.get("name"))
+        return "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
 
     def as_header_for_url(self, url: str) -> str:
         return self.as_header(urlparse(url).netloc)

@@ -46,11 +46,14 @@ class TestFingerprintManager:
         assert "paranoid" in profiles
 
     def test_register_custom_profile(self):
-        FingerprintManager.register_profile("custom", {
-            "name": "自定义",
-            "js_scripts": ["/* custom */"],
-            "disable_webgl": True,
-        })
+        FingerprintManager.register_profile(
+            "custom",
+            {
+                "name": "自定义",
+                "js_scripts": ["/* custom */"],
+                "disable_webgl": True,
+            },
+        )
         fm = FingerprintManager("custom")
         assert fm.profile_name == "custom"
         assert fm.get_init_js() == "/* custom */"

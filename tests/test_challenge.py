@@ -1,6 +1,5 @@
 """挑战检测单元测试 — 纯 HTML 解析，不需要浏览器。"""
 
-
 from src.config.settings import (
     CHALLENGE_TYPE_CLOUDFLARE,
     CHALLENGE_TYPE_FIVE_SECOND,
@@ -95,7 +94,9 @@ class TestGenericDetect:
 
         from src.config.settings import CHALLENGE_SELECTORS, GENERIC_CHALLENGE_SELECTORS
 
-        html = "<html><head><title>Access denied</title></head><body><div class='challenge-container'></div></body></html>"
+        html = (
+            "<html><head><title>Access denied</title></head><body><div class='challenge-container'></div></body></html>"
+        )
         doc = PyQuery(html)
         all_selectors = CHALLENGE_SELECTORS + GENERIC_CHALLENGE_SELECTORS
         found = any(doc(s) for s in all_selectors)
