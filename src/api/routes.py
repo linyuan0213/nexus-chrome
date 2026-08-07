@@ -1,7 +1,6 @@
 """API 路由 — Session 为操作单元。"""
 
 import asyncio
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -24,6 +23,7 @@ from src.api.schemas import (
 )
 from src.config.settings import HTTP_CLIENT_TIMEOUT, HTTP_MAX_REDIRECTS
 from src.http.client import HttpClient
+from src.services.request_service import execute_request
 from src.services.session_service import create_session, get_session_manager
 
 sessions_router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -200,120 +200,13 @@ async def http_fetch(session_id: str, request: HttpFetchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-_CHALLENGE_STATUS_CODES = {403, 503, 429}
-_CHALLENGE_INDICATORS = [
-    "Just a moment",
-    "cf-turnstile-response",
-    "Checking your browser",
-    "DDoS protection",
-    "challenge",
-    "cf-challenge",
-    "please wait",
-]
-
-
-def _is_challenge_response(result: dict[str, Any]) -> bool:
-    """判断 fetch 结果是否命中 WAF/盾。"""
-    if result.get("status_code") in _CHALLENGE_STATUS_CODES:
-        return True
-    body = (result.get("body") or "").lower()
-    return any(indicator.lower() in body for indicator in _CHALLENGE_INDICATORS)
-
-
-def _clean_response_headers(headers: dict[str, str]) -> dict[str, str]:
-    """移除 body 已解码后不再适用的压缩相关头，避免下游重复解码。"""
-    cleaned = dict(headers)
-    for key in list(cleaned.keys()):
-        if key.lower() in ("content-encoding", "transfer-encoding"):
-            cleaned.pop(key)
-    return cleaned
-
-
 @sessions_router.post("/{session_id}/request", response_model=ApiResponse)
 async def unified_request(session_id: str, request: RequestOperation):
     """聚合请求：fetch 优先；命中挑战且允许时改用浏览器网络栈或 navigate 过盾后再 fetch。"""
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        client = HttpClient(
-            base_timeout=HTTP_CLIENT_TIMEOUT,
-            max_redirects=HTTP_MAX_REDIRECTS,
-        )
-
-        if request.return_html:
-            # 渲染模式：直接 navigate 取 HTML
-            result = await asyncio.to_thread(
-                session.navigate,
-                request.url,
-                None,
-                request.cookie,
-                None,
-                request.timeout,
-            )
-            return ApiResponse(
-                code=0,
-                message="ok",
-                data={
-                    "status_code": 200,
-                    "headers": {"content-type": "text/html; charset=utf-8"},
-                    "body": "",
-                    "html": result.get("html", ""),
-                    "challenge": result.get("challenge"),
-                    "url": result.get("url", request.url),
-                },
-            )
-
-        fetch_headers = dict(request.headers or {})
-        if request.cookie:
-            fetch_headers["Cookie"] = request.cookie
-
-        # HTTP 模式：先 fetch
-        result = await asyncio.to_thread(
-            client.fetch,
-            url=request.url,
-            method=request.method,
-            headers=fetch_headers,
-            data=request.data,
-            cookie_store=session.cookie_store,
-            timeout=request.timeout,
-        )
-
-        # 命中挑战且允许回退时过盾
-        if _is_challenge_response(result) and request.navigate_if_challenge:
-            if request.browser_fetch_on_challenge:
-                # 使用浏览器网络栈重新请求，获取原始响应体
-                result = await asyncio.to_thread(
-                    session.browser_fetch,
-                    request.url,
-                    request.method,
-                    fetch_headers,
-                    request.data,
-                    request.cookie,
-                    request.timeout,
-                )
-            else:
-                nav_result = await asyncio.to_thread(
-                    session.navigate,
-                    request.url,
-                    None,
-                    request.cookie,
-                    None,
-                    request.timeout,
-                )
-                # 过盾后再 fetch 一次
-                result = await asyncio.to_thread(
-                    client.fetch,
-                    url=request.url,
-                    method=request.method,
-                    headers=fetch_headers,
-                    data=request.data,
-                    cookie_store=session.cookie_store,
-                    timeout=request.timeout,
-                )
-                result["challenge"] = nav_result.get("challenge")
-                result["url_after_challenge"] = nav_result.get("url", request.url)
-
-        result["headers"] = _clean_response_headers(result.get("headers", {}))
+        result = await execute_request(session, **request.model_dump())
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -149,7 +149,7 @@ class TestFetch:
 class TestRequest:
     def test_request_uses_browser_fetch_on_challenge(self, client, mock_session_manager):
         sm, session = mock_session_manager
-        with patch("src.api.routes.HttpClient") as MockClient:
+        with patch("src.services.request_service.HttpClient") as MockClient:
             instance = MockClient.return_value
             instance.fetch.return_value = {
                 "url": "https://example.com/",
@@ -185,7 +185,7 @@ class TestRequest:
 
     def test_request_returns_challenge_when_no_fallback(self, client, mock_session_manager):
         sm, session = mock_session_manager
-        with patch("src.api.routes.HttpClient") as MockClient:
+        with patch("src.services.request_service.HttpClient") as MockClient:
             instance = MockClient.return_value
             instance.fetch.return_value = {
                 "url": "https://example.com/",
