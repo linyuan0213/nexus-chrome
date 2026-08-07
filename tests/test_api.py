@@ -41,8 +41,8 @@ def mock_session_manager():
 
 class TestCreateSession:
     def test_create_session(self, client, mock_session_manager):
-        sm, _ = mock_session_manager
-        with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
+        sm, session = mock_session_manager
+        with patch("src.services.session_service.create_session", return_value=session):
             response = client.post(
                 "/sessions",
                 json={
@@ -56,13 +56,14 @@ class TestCreateSession:
         data = response.json()
         assert data["code"] == 0
         assert data["data"]["id"] == "work"
-        sm.create.assert_called_once_with("work", "stealth", "Mozilla/5.0", "http://proxy:8080")
 
     def test_create_duplicate(self, client, mock_session_manager):
-        sm, session = mock_session_manager
-        sm.create.side_effect = ValueError("会话已存在")
+        session = mock_session_manager[1]
         session.to_dict.return_value = {"id": "work", "tabs": []}
-        with patch("src.api.routes.session_manager", sm), patch("src.api.routes._get_sm", return_value=sm):
+        with (
+            patch("src.services.session_service.create_session", side_effect=ValueError("会话已存在")),
+            patch("src.api.routes._get_sm", return_value=mock_session_manager[0]),
+        ):
             response = client.post("/sessions", json={"session_id": "work"})
         assert response.status_code == 200
         data = response.json()

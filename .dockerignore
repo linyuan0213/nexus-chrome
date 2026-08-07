@@ -1,7 +1,6 @@
 .git
 .github
 *.deb
-*.so
 patched_libs
 .pytest_cache
 __pycache__

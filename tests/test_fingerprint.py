@@ -27,8 +27,9 @@ class TestFingerprintManager:
         fm = FingerprintManager("stealth")
         js = fm.get_init_js()
         assert "modifyClickEvent" in js
-        assert "navigator" in js
-        assert "'webdriver'" in js
+        # JS 指纹伪装已移除（webdriver/userAgentData 等在 C++/Blink 层实现），
+        # stealth 与 default 一样仅保留点击随机化
+        assert "webdriver" not in js
 
     def test_get_browser_args_default(self):
         fm = FingerprintManager("default")
@@ -62,4 +63,5 @@ class TestFingerprintManager:
     def test_config_property(self):
         fm = FingerprintManager("stealth")
         config = fm.config
-        assert config["name"] == "完整指纹伪装（推荐）"
+        # JS 指纹伪装已移除，stealth 仅作为启动参数预设
+        assert config["name"] == "标准参数（推荐）"

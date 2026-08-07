@@ -100,20 +100,41 @@ uv run uvicorn src.main:app --host 0.0.0.0 --port 9850
 docker build -t nexus-chrome-novnc .
 ```
 
-2. 运行容器：
+2. 运行容器（nginx 统一入口 9850 + VNC 端口范围）：
 
 ```bash
-docker run --shm-size=2g -p 9850:9850 -p 6080:6080 -d nexus-chrome-novnc
+docker run --shm-size=2g \
+  -p 9850:9850 \
+  -p 5900-5910:5900-5910 \
+  -p 6080-6100:6080-6100 \
+  -d nexus-chrome-novnc
 ```
 
 ### 网页 VNC 访问
 
-启动容器后，访问 `http://localhost:6080` 查看浏览器会话。
+**统一入口（推荐）：nginx 在 9850 端口**，按实例路径路由，无需记端口号：
+
+```bash
+# 浏览器直接访问该实例的 noVNC（display :N 对应 /chromeN/，默认实例=1）
+http://<host>:9850/chrome1/     # display :1 的实例（默认实例）
+http://<host>:9850/chrome2/     # display :2 的实例
+```
+
+- `/chromeN/` → 该实例的 websockify（noVNC 页面 + VNC 隧道）
+- `/`（及 `/sessions`、`/instances` 等 API）→ FastAPI 应用（内部 9851）
+
+`GET /instances` 返回每个实例的 `display`（即 `/chrome{display号}/`）与 `web_port`。
+
+**备用：直连 websockify 端口**（端口已发布到宿主机）：
+
+```bash
+http://<host>:6081/   # display :1 的 noVNC
+```
 
 **端口说明：**
-- `9850`: FastAPI 服务器端口
-- `6080`: noVNC 网页界面端口
-- `5900`: VNC 服务器端口（内部使用）
+- `9850`: **nginx 统一入口**（实例 noVNC `/chromeN/` + 应用 API `/`）
+- `5900+N`: 每实例 x11vnc（`display :N`，仅容器内 127.0.0.1）
+- `6080+N`: 每实例 websockify（nginx 上游，也可直连）
 
 ### 包安装
 
@@ -221,3 +242,16 @@ uv run pytest tests/ -v
 ## 许可证
 
 MIT License - 详见 LICENSE 文件。
+
+## 指纹配置中心（内建）
+
+nexus-chrome 内建指纹画像管理（`/api/profiles`），配合 patched Chromium 的原生指纹读取：
+
+- **画像管理**：`GET/POST /api/profiles`、回滚、灰度、历史版本
+- **签名下发**：HMAC-SHA256，节点验签后使用
+- **节点心跳**：`GET /api/nodes/{node_id}/heartbeat`
+- **浏览器接线**：会话创建传 `fp_profile_id` → 解析画像 → 注入 `FP_*` 环境变量 → 按画像启动浏览器（画像变化自动重启）
+- **客户端**：`src/fp/`（模型/渲染/sync/存储）
+- **Chromium patch 集**：`fp_patches/`（构建脚本 + 按功能拆分的 patch + fp_config.h）
+
+完整 API 见 `docs/fp_config_center_api.md`。鉴权：设置 `FP_ADMIN_TOKEN`/`FP_NODE_TOKEN` 环境变量即强制校验。

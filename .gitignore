@@ -169,3 +169,10 @@ test.text
 *.deb
 libvk_swiftshader_patched.so
 page-snapshot.md
+data/
+*.db
+
+# 本地构建产物与内部工具
+fp_patches/
+patched_libs/
+tmp/

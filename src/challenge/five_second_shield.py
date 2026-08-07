@@ -22,6 +22,9 @@ class FiveSecondShieldResolver(ChallengeResolver):
             return False
         if not html:
             return False
+        # 先排除 Cloudflare 拦截页，避免把 CF 挑战误判为五秒盾。
+        if any(marker in html for marker in ("_cf_chl_opt", 'id="challenge-form"', 'id="challenge-stage"')):
+            return False
         doc = pq(html)
         for selector in FIVE_SECOND_SELECTORS:
             if doc(selector):
