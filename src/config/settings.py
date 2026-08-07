@@ -240,9 +240,3 @@ VNC_WEB_PORT_MAX = int(os.getenv("VNC_WEB_PORT_MAX", "6100"))  # websockify 端�
 # HTTP 客户端配置
 HTTP_CLIENT_TIMEOUT = int(os.getenv("HTTP_CLIENT_TIMEOUT", "30"))
 HTTP_MAX_REDIRECTS = int(os.getenv("HTTP_MAX_REDIRECTS", "10"))
-
-# 向后兼容别名
-
-# Turnstile hook JS，在创建 tab 时通过 add_init_js 注入
-with open(os.path.join(os.path.dirname(__file__), "turnstile_hook.js")) as _f:
-    TURNSTILE_HOOK_JS = _f.read()
