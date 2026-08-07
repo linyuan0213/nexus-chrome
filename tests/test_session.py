@@ -63,7 +63,7 @@ class TestSessionNavigate:
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -81,7 +81,7 @@ class TestSessionNavigate:
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -101,7 +101,7 @@ class TestSessionProxy:
         mock_browser.new_context.return_value = mock_context
         session = Session("s1", mock_browser, FingerprintManager("stealth"), proxy="http://proxy:8080")
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -118,7 +118,7 @@ class TestSessionProxy:
         mock_browser.new_context.side_effect = RuntimeError("not supported")
         session = Session("s1", mock_browser, FingerprintManager("stealth"), proxy="http://proxy:8080")
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -132,7 +132,7 @@ class TestSessionInteraction:
     def test_click(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -148,7 +148,7 @@ class TestSessionInteraction:
         """drag 走人性化轨迹驱动，不直接调用 DrissionPage 原生拖拽。"""
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -156,14 +156,14 @@ class TestSessionInteraction:
                 "duration_ms": 0,
             }
             session.navigate("https://example.com/")
-        with patch("src.core.session.human_drag_selector") as mock_drag:
+        with patch("src.core.session.session.human_drag_selector") as mock_drag:
             session.drag("#slider", 200)
             mock_drag.assert_called_once_with(mock_tab, "#slider", 200, 0, 1.0)
 
     def test_input_text(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -179,7 +179,7 @@ class TestSessionInteraction:
     def test_execute(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -195,7 +195,7 @@ class TestSessionClose:
     def test_close_tab(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -234,7 +234,7 @@ class TestSessionTabLifecycle:
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -251,7 +251,7 @@ class TestSessionTabLifecycle:
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
@@ -276,7 +276,7 @@ class TestSessionTabLifecycle:
         }
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
-        with patch("src.core.session.ChallengeOrchestrator") as MockOrchestrator:
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {
                 "detected": False,
                 "type": "none",
