@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 # Chrome 发布版本号（对应 GitHub Releases tag: chrome-<CHROME_VERSION>）
 ARG CHROME_VERSION=153.0.7991.0
-# buildx 多架构：amd64 / arm64（映射到发布包架构名 x64 / arm64）
-ARG TARGETARCH=amd64
+# buildx 多架构：amd64 / arm64（BuildKit 自动注入当前平台，映射到发布包架构名 x64 / arm64）
+ARG TARGETARCH
 
 ENV CHROME_PATH=/opt/patched-chrome/chrome
 ENV LANG=zh_CN.UTF-8
