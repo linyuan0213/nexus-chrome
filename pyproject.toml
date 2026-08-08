@@ -1,6 +1,6 @@
 [project]
 name = "nexus-chrome"
-version = "3.2.3"
+version = "3.2.4"
 description = "Nexus Chrome Service - Browser automation service for Nexus Media"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,11 +8,12 @@ dependencies = [
     "drissionpage>=4.2.0b14",
     "fake-useragent>=2.2.0",
     "fastapi>=0.122.0",
-    "httpx>=0.28.0",
+    "httpx2>=2.9.1",
     "loguru>=0.7.3",
     "pydantic>=2.12.5",
     "pyquery>=2.0.1",
     "uvicorn>=0.38.0",
+    "websockets>=14.0",
     "websockify>=0.10.0",
 ]
 
@@ -93,3 +94,6 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
 ]
+
+[tool.uv]
+prerelease = "allow"

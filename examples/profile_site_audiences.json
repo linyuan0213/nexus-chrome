@@ -1,0 +1,25 @@
+{
+  "profile_id": "site-audiences",
+  "name": "Audiences 站点画像",
+  "version": 1,
+  "enabled": true,
+  "rollout": { "percent": 100, "nodes": [] },
+  "fingerprint": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "ua_full_version": "151.0.0.0",
+    "ua_brand_version": "151",
+    "languages": ["zh-CN", "zh", "en-US", "en"],
+    "platform": "Linux x86_64",
+    "cores": 8,
+    "memory": 8,
+    "webgl_vendor": "Intel Inc.",
+    "webgl_renderer": "Intel Iris OpenGL Engine",
+    "canvas_noise": true,
+    "canvas_seed": 0,
+    "font_block": [],
+    "rtc_ip": "",
+    "uad_platform": "Linux",
+    "uad_arch": "x86_64",
+    "uad_model": ""
+  }
+}

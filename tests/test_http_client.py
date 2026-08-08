@@ -34,7 +34,7 @@ class TestHttpClient:
         mock_response.text = '{"ok": true}'
 
         client = HttpClient(base_timeout=10)
-        with patch("httpx.Client") as mock_client:
+        with patch("httpx2.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
             result = client.fetch("https://example.com/api", cookie_store=store)
             assert result["status_code"] == 200
@@ -52,7 +52,7 @@ class TestHttpClient:
         mock_response.text = "ok"
 
         client = HttpClient(base_timeout=10)
-        with patch("httpx.Client") as mock_client:
+        with patch("httpx2.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
             result = client.fetch("https://example.com/api")
             assert result["status_code"] == 200
@@ -60,7 +60,7 @@ class TestHttpClient:
 
     def test_fetch_error_handling(self):
         client = HttpClient(base_timeout=5)
-        with patch("httpx.Client") as mock_client:
+        with patch("httpx2.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.request.side_effect = Exception("Connection refused")
             result = client.fetch("https://invalid.example.com/")
             assert result["status_code"] == -1
@@ -74,7 +74,7 @@ class TestHttpClient:
         mock_response.text = "created"
 
         client = HttpClient(base_timeout=10)
-        with patch("httpx.Client") as mock_client:
+        with patch("httpx2.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
             result = client.fetch(
                 "https://example.com/api",

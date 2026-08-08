@@ -1,77 +1,120 @@
 # Nexus Chrome 服务器
 
+基于 patched Chromium（C++ 编译期指纹）的挑战绕过、Cookie 提取与指纹仿真服务。
+
 ## 项目结构
 
 ```
 nexus-chrome/
-├── src/                    # 源代码
-│   ├── __init__.py
-│   ├── main.py            # 主 FastAPI 应用
-│   ├── config/            # 配置模块
-│   │   ├── __init__.py
-│   │   └── settings.py    # 应用设置和常量
-│   ├── core/              # 核心功能
-│   │   ├── __init__.py
-│   │   ├── browser_manager.py  # 浏览器管理
-│   │   ├── cookie_store.py     # Cookie 共享存储
-│   │   ├── fingerprint.py      # 指纹管理器
-│   │   └── session.py          # Session + SessionManager
-│   ├── challenge/         # 挑战解析器
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── resolver.py
-│   │   ├── cloudflare.py
-│   │   ├── five_second_shield.py
-│   │   ├── leichi.py
-│   │   └── generic.py
-│   ├── http/              # HTTP 客户端
-│   │   ├── __init__.py
-│   │   └── client.py
-│   ├── api/               # API 层
-│   │   ├── __init__.py
-│   │   ├── schemas.py     # 请求/响应模式
-│   │   └── routes.py      # API 路由处理器
-│   └── utils/             # 工具函数
-│       ├── __init__.py
-│       └── challenge_utils.py
-├── main.py                # 应用入口点
-├── pyproject.toml         # 项目配置和依赖管理（uv）
-├── Dockerfile            # Docker 配置
-├── supervisord.conf      # 进程管理
-├── start.sh              # 启动脚本
-└── README.md             # 本文件
+├── src/                        # 源代码
+│   ├── main.py                # 主 FastAPI 应用（装配、生命周期、/instances、/ws/events）
+│   ├── config/                # 配置模块
+│   │   ├── settings.py        # 应用设置和常量
+│   │   └── scripts.py         # 浏览器 JS 脚本（Turnstile 组件修复等）
+│   ├── core/                  # 核心业务
+│   │   ├── browser_manager/   # 浏览器实例池（包）
+│   │   │   ├── env.py         #   时区检测与基础 FP_* 环境
+│   │   │   ├── process.py     #   Chrome 启动参数、端口/Xvfb 原语
+│   │   │   ├── instance.py    #   ChromeInstance 单实例生命周期
+│   │   │   └── pool.py        #   BrowserPool 实例池与监控回收
+│   │   ├── session/           # 会话（包，按职责沿继承链拆分）
+│   │   │   ├── base.py        #   属性声明与标签页/指纹底层原语
+│   │   │   ├── cookies.py     #   Cookie 存取与合并
+│   │   │   ├── fetch.py       #   浏览器网络栈请求（自动过盾）
+│   │   │   ├── download.py    #   文件下载（原生 + JS fetch 回退）
+│   │   │   ├── media.py       #   m3u8 探测与解析
+│   │   │   ├── tabs.py        #   标签页管理与截图
+│   │   │   ├── session.py     #   核心：导航过盾、页面交互、代理
+│   │   │   ├── manager.py     #   SessionManager 与持久化注册表
+│   │   │   └── events.py      #   全局事件总线（WebSocket 推送）
+│   │   ├── cookie_store.py    # Cookie 共享存储
+│   │   └── fingerprint.py     # 指纹管理器
+│   ├── challenge/             # 挑战解析器（策略模式）
+│   │   ├── resolver.py        #   编排器
+│   │   ├── cloudflare.py / five_second_shield.py / leichi.py / generic.py
+│   ├── fp/                    # 指纹画像（配置中心客户端）
+│   │   ├── profile.py / store.py / render.py / service.py
+│   │   └── sync_client.py / signing.py / config.py
+│   ├── services/              # 应用编排层（api → services → core/fp）
+│   │   ├── session_service.py #   会话创建：画像解析 → 实例路由 → 会话
+│   │   └── request_service.py #   /request 聚合请求（fetch→过盾回退策略链）
+│   ├── http/                  # HTTP 客户端（httpx2，与 CookieStore 双向同步）
+│   ├── api/                   # API 层
+│   │   ├── routes.py          #   /sessions 会话路由（薄处理器）
+│   │   ├── fp_profiles.py     #   /api/profiles 画像 CRUD 路由
+│   │   └── schemas.py         #   请求/响应模型
+│   └── utils/                 # 工具函数
+│       ├── challenge_utils.py / cleanup.py / humanize.py
+├── main.py                    # 应用入口点
+├── tests/                     # pytest 测试套件
+├── docs/                      # 文档（指纹配置中心 API）
+├── examples/                  # 画像示例
+├── deploy/                    # nginx 配置
+├── scripts/                   # 辅助脚本（本地 CDP Chrome、字体配置）
+├── pyproject.toml             # 项目配置和依赖管理（uv）
+├── Dockerfile                 # Docker 配置（下载 patched Chromium）
+├── supervisord.conf           # 进程管理
+└── start.sh                   # 启动脚本
 ```
 
 ## 功能特性
 
-- **Session 隔离浏览器自动化**：每个站点/流程独立 Cookie、标签页、指纹
-- **自动过盾**：Cloudflare、五秒盾、雷池、通用 WAF
+- **多指纹并发**：每个指纹画像对应独立 Chrome 进程（独立 user-data-dir / 调试端口 / `FP_*` 环境变量），不同指纹同时运行
+- **C++ 级指纹**：指纹编译进 patched Chromium 二进制（`fp_config` 读 `FP_*` 环境变量），非 JS 注入，避免被风控检测
+- **网络层一致性**：HTTP 请求头（User-Agent / Sec-CH-UA）与 JS 指纹同步覆盖
+- **自动过盾**：Cloudflare（标准/Turnstile 嵌入）、五秒盾、雷池、通用 WAF、ALTCHA
 - **Cookie 共享**：浏览器过盾后自动复用 Cookie 到 HTTP 快路径
-- **RESTful API**：基于 FastAPI 的异步接口
-- **Docker 支持**：使用 Docker 轻松部署
+- **人性化交互**：贝塞尔轨迹点击/拖拽，对抗鼠标轨迹检测
+- **指纹配置中心**：画像 CRUD / 灰度 / 回滚 / HMAC 签名下发
+- **RESTful API + WebSocket 事件推送**
 - **网页 VNC**：通过 noVNC 查看浏览器会话（容器模式）
 
 ## API 端点
 
-### 根路径
+### 根路径与实例
 - `GET /` - API 信息
 - `GET /status` - 服务状态
+- `GET /instances` - 列出浏览器实例
+- `DELETE /instances/{key}` - 手动关闭实例
+- `WS /ws/events?types=...` - 事件推送（session_created / session_deleted）
 
 ### Session 管理
-- `POST /sessions` - 创建会话
-- `GET /sessions` - 列出会话
+- `POST /sessions` - 创建会话（支持 `fp_profile_id` 绑定指纹画像）
+- `GET /sessions` - 列出会话（含可恢复会话）
 - `DELETE /sessions/{id}` - 删除会话
 
 ### 浏览器操作（基于 Session）
 - `POST /sessions/{id}/navigate` - 浏览器导航（自动过盾、提取 Cookie）
 - `GET /sessions/{id}/html` - 获取当前页面 HTML
 - `GET /sessions/{id}/cookies` - 获取已存储 Cookie
-- `POST /sessions/{id}/click` - 在当前页面点击元素
-- `POST /sessions/{id}/input` - 在当前页面输入文本
+- `POST /sessions/{id}/click` - 点击元素（人性化轨迹）
+- `POST /sessions/{id}/drag` - 拖拽（滑块验证码）
+- `POST /sessions/{id}/input` - 输入文本
 - `POST /sessions/{id}/execute` - 执行自定义 JavaScript
+- `POST /sessions/{id}/screenshot` - 截图（base64 PNG）
+- `POST /sessions/{id}/proxy` - 运行时切换代理
 
-### HTTP 快路径
-- `POST /sessions/{id}/fetch` - 使用 Session Cookie 发起纯 HTTP 请求
+### 标签页
+- `GET /sessions/{id}/tabs` - 列出标签页
+- `POST /sessions/{id}/tabs` - 新建标签页
+- `POST /sessions/{id}/tabs/switch` - 切换活动标签页
+- `DELETE /sessions/{id}/tabs/{tab_name}` - 关闭标签页
+
+### HTTP 请求
+- `POST /sessions/{id}/fetch` - 纯 HTTP 请求（复用 Session Cookie）
+- `POST /sessions/{id}/request` - 聚合请求（fetch 优先，命中挑战自动过盾回退）
+- `POST /sessions/{id}/download` - 浏览器网络栈下载
+- `POST /sessions/{id}/m3u8` - m3u8 播放列表探测与解析
+
+### 指纹配置中心
+- `GET/POST /api/profiles` - 画像列表 / 创建更新
+- `GET /api/profiles/{id}` - 画像详情（节点拉取，HMAC 签名）
+- `GET /api/profiles/{id}/versions` - 历史版本
+- `POST /api/profiles/{id}/rollback` - 回滚
+- `POST /api/profiles/{id}/gray` - 灰度发布
+- `GET /api/nodes/{node_id}/heartbeat` - 节点心跳
+
+完整画像 API 见 `docs/fp_config_center_api.md`。
 
 ## 安装部署
 
@@ -90,43 +133,61 @@ uv sync
 
 3. 运行服务器：
 ```bash
-uv run uvicorn src.main:app --host 0.0.0.0 --port 9850
+uv run python main.py
 ```
 
 ### Docker 部署
+
+镜像构建时自动从 GitHub Releases 下载 patched Chromium（版本由 `.chrome-version` 锁定）。
 
 1. 构建镜像：
 ```bash
 docker build -t nexus-chrome-novnc .
 ```
 
-2. 运行容器：
+2. 运行容器（nginx 统一入口 9850 + VNC 端口范围）：
 
 ```bash
-docker run --shm-size=2g -p 9850:9850 -p 6080:6080 -d nexus-chrome-novnc
+docker run --shm-size=2g \
+  -e VNC_PASSWORD=your_password \
+  -p 9850:9850 \
+  -p 5900-5910:5900-5910 \
+  -p 6080-6100:6080-6100 \
+  -d nexus-chrome-novnc
 ```
 
 ### 网页 VNC 访问
 
-启动容器后，访问 `http://localhost:6080` 查看浏览器会话。
-
-**端口说明：**
-- `9850`: FastAPI 服务器端口
-- `6080`: noVNC 网页界面端口
-- `5900`: VNC 服务器端口（内部使用）
-
-### 包安装
+**统一入口（推荐）：nginx 在 9850 端口**，按实例路径路由，无需记端口号：
 
 ```bash
-uv pip install -e .
+# 浏览器直接访问该实例的 noVNC（display :N 对应 /chromeN/，默认实例=1）
+http://<host>:9850/chrome1/     # display :1 的实例（默认实例）
+http://<host>:9850/chrome2/     # display :2 的实例
 ```
+
+- `/chromeN/` → 该实例的 websockify（noVNC 页面 + VNC 隧道）
+- `/`（及 `/sessions`、`/instances` 等 API）→ FastAPI 应用（内部 9851）
+
+`GET /instances` 返回每个实例的 `display`（即 `/chrome{display号}/`）与 `web_port`。
+
+**备用：直连 websockify 端口**（端口已发布到宿主机）：
+
+```bash
+http://<host>:6081/   # display :1 的 noVNC
+```
+
+**端口说明：**
+- `9850`: **nginx 统一入口**（实例 noVNC `/chromeN/` + 应用 API `/`）
+- `5900+N`: 每实例 x11vnc（`display :N`，仅容器内 127.0.0.1）
+- `6080+N`: 每实例 websockify（nginx 上游，也可直连）
 
 ## 使用示例
 
 ### 创建会话并导航（自动过盾）
 
 ```bash
-# 创建会话
+# 创建会话（可选 fp_profile_id 绑定指纹画像）
 curl -X POST http://localhost:9850/sessions \
   -H "Content-Type: application/json" \
   -d '{"session_id": "work", "fingerprint_profile": "stealth"}'
@@ -150,7 +211,7 @@ curl -X POST http://localhost:9850/sessions/work/input \
   -H "Content-Type: application/json" \
   -d '{"selector": "#username", "text": "admin"}'
 
-# 点击元素
+# 人性化点击元素
 curl -X POST http://localhost:9850/sessions/work/click \
   -H "Content-Type: application/json" \
   -d '{"selector": "#submit"}'
@@ -161,13 +222,18 @@ curl -X POST http://localhost:9850/sessions/work/click \
 环境变量：
 - `APP_HOST`: 服务器主机（默认：0.0.0.0）
 - `APP_PORT`: 服务器端口（默认：9850）
-- `CHROME_PATH`: 自定义 Chrome 浏览器路径
+- `CHROME_PATH`: 自定义 Chrome 浏览器路径（容器内默认 `/opt/patched-chrome/chrome`）
 - `HEADLESS_MODE`: 无头模式（默认：`--headless=new`）
 - `REMOTE_CHROME_ADDRESS`: 远程 Chrome CDP 地址，如 `127.0.0.1:9222`
-- `VNC_PASSWORD`: VNC 密码（默认：password，部署时必须修改）
-- `CHALLENGE_TIMEOUT`: 挑战等待超时（默认：30 秒）
+- `VNC_PASSWORD`: VNC 密码（部署时必须修改，禁止默认值）
+- `CHALLENGE_TIMEOUT`: 挑战等待超时（默认：60 秒）
 - `HTTP_CLIENT_TIMEOUT`: HTTP 客户端超时（默认：30 秒）
+- `MAX_BROWSERS`: 浏览器实例上限（默认：5）
+- `INSTANCE_IDLE_TTL`: 空闲实例回收 TTL（默认：600 秒）
+- `DATA_DIR`: 会话持久化目录（默认：`./data`）
 - `USER_DATA_PATH`: Chrome 用户数据目录路径（默认：`~/.cache/nexus-chrome/user_data`）
+- `PROFILE_DATA_DIR`: 画像实例用户数据目录（默认：`~/.cache/nexus-chrome/profiles`）
+- `FP_ADMIN_TOKEN` / `FP_NODE_TOKEN`: 配置中心鉴权（设置后强制校验）
 - `CLEANUP_ENABLED`: 是否启用用户数据目录定期清理（默认：`true`）
 - `CLEANUP_INTERVAL`: 清理间隔，单位秒（默认：3600）
 - `CLEANUP_MAX_SIZE_GB`: 超过该大小触发深度清理，单位 GB（默认：2，0 表示禁用）
@@ -207,16 +273,38 @@ docker run --shm-size=2g \
 uv run pytest tests/ -v
 ```
 
+### 质量检查
+
+```bash
+uv run ruff check src tests main.py   # lint
+uv run pyright src                    # 类型检查（strict）
+```
+
+pre-commit 已配置 ruff + ruff-format + pyright 钩子。
+
 ### 代码结构
 
-项目遵循清晰架构模式：
+分层架构：`api → services → {core, fp, challenge, http}`
 
-- **src/config**: 应用配置和常量
-- **src/core**: 核心业务逻辑、浏览器管理、Session、Cookie、指纹
-- **src/challenge**: 挑战解析器（Cloudflare、五秒盾、雷池等）
-- **src/http**: 基于 httpx 的 HTTP 客户端，与 Session Cookie 集成
-- **src/api**: API 路由和请求/响应模式
-- **src/utils**: 工具函数和辅助程序
+- **src/api**: 薄路由层，只做参数校验与响应包装
+- **src/services**: 应用编排（唯一同时依赖 core 与 fp 的层，打破 core↔fp 纠缠）
+- **src/core**: 会话与浏览器池（不感知 fp 层）；session 与 browser_manager 均为按职责拆分的包
+- **src/fp**: 指纹画像（模型/SQLite 存储/渲染/远程同步/HMAC 签名）
+- **src/challenge**: 挑战解析器（策略模式，Cloudflare/五秒盾/雷池/通用）
+- **src/http**: 基于 httpx2 的 HTTP 客户端，与 Session Cookie 双向同步
+- **src/config**: 配置与常量（JS 脚本独立在 scripts.py）
+
+## 指纹配置中心（内建）
+
+nexus-chrome 内建指纹画像管理（`/api/profiles`），配合 patched Chromium 的原生指纹读取：
+
+- **画像管理**：`GET/POST /api/profiles`、回滚、灰度、历史版本
+- **签名下发**：HMAC-SHA256，节点验签后使用
+- **节点心跳**：`GET /api/nodes/{node_id}/heartbeat`
+- **浏览器接线**：会话创建传 `fp_profile_id` → 解析画像 → 注入 `FP_*` 环境变量 → 按画像启动浏览器（画像变化自动重启）
+- **客户端**：`src/fp/`（模型/渲染/sync/存储）
+
+完整 API 见 `docs/fp_config_center_api.md`。鉴权：设置 `FP_ADMIN_TOKEN`/`FP_NODE_TOKEN` 环境变量即强制校验。
 
 ## 许可证
 
