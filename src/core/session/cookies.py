@@ -2,6 +2,8 @@
 
 from typing import Any, Dict, List, Optional
 
+from loguru import logger
+
 from src.core.session.base import SessionBase
 
 
@@ -22,19 +24,19 @@ class CookieMixin(SessionBase):
                 ],
             )
 
-    def _store_cookies_from_cdp(self, domain: str, cookies: List[Dict[str, str]]) -> None:
-        for c in cookies:
-            self.cookie_store.store(
-                domain,
-                [
-                    {
-                        "name": c.get("name", ""),
-                        "value": c.get("value", ""),
-                        "domain": c.get("domain", domain),
-                        "path": c.get("path", "/"),
-                    }
-                ],
-            )
+    def _sync_page_cookies(self, tab: Any, domain: str) -> None:
+        """从页面同步 Cookie 到 CookieStore（tab.cookies 失败时回退 CDP Storage.getCookies）。"""
+        try:
+            cookies = tab.cookies()
+            if cookies:
+                self._store_cookies(domain, cookies)
+        except Exception:
+            try:
+                browser_any: Any = self._browser
+                result = browser_any._run_cdp("Storage.getCookies")
+                self._store_cookies(domain, result.get("cookies", []))
+            except Exception:
+                logger.debug(f"[Session:{self.id}] CDP 获取 Cookies 失败，跳过")
 
     @staticmethod
     def _parse_cookie_header(cookie_str: str) -> List[Dict[str, str]]:

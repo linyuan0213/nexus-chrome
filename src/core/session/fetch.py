@@ -125,17 +125,7 @@ class FetchMixin(CookieMixin):
             if "error" in result_dict:
                 raise RuntimeError(f"JS fetch failed: {result_dict.get('error')}")
 
-            try:
-                cookies = tab.cookies()
-                if cookies:
-                    self._store_cookies(domain, cookies)
-            except Exception:
-                try:
-                    browser_any: Any = self._browser
-                    result_cdp = cast(Dict[str, Any], browser_any._run_cdp("Storage.getCookies"))
-                    self._store_cookies_from_cdp(domain, result_cdp.get("cookies", []))
-                except Exception:
-                    logger.debug("fetch 后 CDP 获取 Cookies 失败，跳过")
+            self._sync_page_cookies(tab, domain)
 
             return {
                 "url": result_dict.get("url", tab.url),

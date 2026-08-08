@@ -1,7 +1,6 @@
 """ChromeInstance — 单个指纹的 Chrome 实例（进程 + 存储 + 指纹 env 隔离）。"""
 
 import os
-import shutil
 import subprocess
 import threading
 import time as _time
@@ -14,11 +13,8 @@ from src.config.settings import (
     CHROME_PATH,
     DEFAULT_FINGERPRINT_PROFILE,
     REMOTE_CHROME_ADDRESS,
-    VNC_ENABLED,
-    VNC_PASSWORD,
     VNC_PORT_BASE,
     VNC_WEB_PORT_BASE,
-    VNC_WEB_PORT_MAX,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
@@ -29,6 +25,7 @@ from src.core.browser_manager.process import (
     start_xvfb,
     wait_for_port,
 )
+from src.core.browser_manager.vnc import VncStack
 
 
 class ChromeInstance:
@@ -63,8 +60,7 @@ class ChromeInstance:
         self._chrome_proc: Optional[subprocess.Popen[bytes]] = None
         self._chrome_stderr: Optional[IO[str]] = None
         self._xvfb_proc: Optional[subprocess.Popen[bytes]] = None
-        self._x11vnc_proc: Optional[subprocess.Popen[bytes]] = None
-        self._websockify_proc: Optional[subprocess.Popen[bytes]] = None
+        self._vnc = VncStack(key, self.display, self.vnc_port, self.web_port)
         self._lock = threading.Lock()
         self._last_used = _time.monotonic()
         # 会话引用计数：>0 表示有活跃会话在使用，0 表示空闲可回收
@@ -206,67 +202,11 @@ class ChromeInstance:
 
     def _start_vnc(self) -> None:
         """为该实例启动 x11vnc + websockify（独立 display → noVNC 网页端口）。"""
-        if not VNC_ENABLED or self.vnc_port is None or self.web_port is None or self.display is None:
-            return
-        if self.web_port > VNC_WEB_PORT_MAX:
-            logger.warning(f"[fp:{self.key}] websockify 端口 {self.web_port} 超过上限 {VNC_WEB_PORT_MAX}，跳过 VNC")
-            return
-        # 幂等：已有存活进程则跳过，避免重复启动
-        if (
-            self._x11vnc_proc
-            and self._x11vnc_proc.poll() is None
-            and self._websockify_proc
-            and self._websockify_proc.poll() is None
-        ):
-            return
-        try:
-            self._x11vnc_proc = subprocess.Popen(
-                [
-                    "x11vnc",
-                    "-display",
-                    self.display,
-                    "-forever",
-                    "-shared",
-                    "-passwd",
-                    VNC_PASSWORD,
-                    "-rfbport",
-                    str(self.vnc_port),
-                    "-listen",
-                    "127.0.0.1",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            logger.debug(f"[fp:{self.key}] 启动 x11vnc 失败: {e}")
-        try:
-            websockify = shutil.which("websockify") or "/app/.venv/bin/websockify"
-            self._websockify_proc = subprocess.Popen(
-                [
-                    websockify,
-                    str(self.web_port),
-                    f"127.0.0.1:{self.vnc_port}",
-                    "--web",
-                    "/opt/noVNC",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            logger.debug(f"[fp:{self.key}] 启动 websockify 失败: {e}")
-        logger.info(f"[fp:{self.key}] VNC 就绪: display={self.display} vnc=:{self.vnc_port} web=:{self.web_port}")
+        self._vnc.start()
 
     def _stop_vnc(self) -> None:
         """停止该实例的 websockify / x11vnc（供重启与关闭时复用）。"""
-        for name, attr in (("websockify", "_websockify_proc"), ("x11vnc", "_x11vnc_proc")):
-            proc = getattr(self, attr)
-            if proc is not None:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except Exception:
-                    logger.debug(f"[fp:{self.key}] 终止 {name} 失败，继续")
-                setattr(self, attr, None)
+        self._vnc.stop()
 
     def shutdown(self) -> None:
         """关闭实例（进程 + DrissionPage 连接 + VNC/Xvfb）。"""

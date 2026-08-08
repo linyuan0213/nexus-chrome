@@ -122,16 +122,9 @@ class Session(TabMixin):
         html = ""
         try:
             html = tab.html
-            cookies = tab.cookies()
-            if cookies:
-                self._store_cookies(domain, cookies)
         except Exception:
-            try:
-                browser_any: Any = self._browser
-                result = browser_any._run_cdp("Storage.getCookies")
-                self._store_cookies_from_cdp(domain, result.get("cookies", []))
-            except Exception:
-                logger.debug("CDP 获取 Cookies 失败，跳过")
+            logger.debug(f"[Session:{self.id}] 读取页面 HTML 失败")
+        self._sync_page_cookies(tab, domain)
 
         page_url = url
         page_title = ""
