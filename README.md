@@ -303,7 +303,6 @@ nexus-chrome 内建指纹画像管理（`/api/profiles`），配合 patched Chro
 - **节点心跳**：`GET /api/nodes/{node_id}/heartbeat`
 - **浏览器接线**：会话创建传 `fp_profile_id` → 解析画像 → 注入 `FP_*` 环境变量 → 按画像启动浏览器（画像变化自动重启）
 - **客户端**：`src/fp/`（模型/渲染/sync/存储）
-- **Chromium patch 集**：`fp_patches/`（C++ 源码 + 构建脚本，本地私有不入库；发布二进制见 nexus-chrome-bin Releases）
 
 完整 API 见 `docs/fp_config_center_api.md`。鉴权：设置 `FP_ADMIN_TOKEN`/`FP_NODE_TOKEN` 环境变量即强制校验。
 
