@@ -5,7 +5,7 @@ import json
 from src.fp.profile import FpProfile, RolloutRule
 from src.fp.render import render_env
 from src.fp.store import store
-from src.fp.sync_client import get_profile, get_profile_local
+from src.fp.sync_client import get_profile, get_profile_local, invalidate_cache
 
 DEFAULT_PROFILE_JSON = json.dumps(
     {
@@ -101,3 +101,24 @@ class TestProfileStore:
 
     def test_missing_profile(self):
         assert get_profile("no-such-profile", use_cache=False) is None
+
+    def test_cache_invalidation(self):
+        """画像更新后 invalidate_cache 使新读取立即拿到新版本（否则 TTL 内返回旧值）。"""
+        invalidate_cache()
+        _seed_profile()
+        assert get_profile("site-audiences").fingerprint.cores == 8  # type: ignore[union-attr]
+
+        # 更新画像但不失效缓存：TTL 内返回旧值
+        data = json.loads(DEFAULT_PROFILE_JSON)
+        fp = {k: v for k, v in data.pop("fingerprint").items()}
+        fp["cores"] = 16
+        store.create_or_update({**data, "fingerprint": fp})
+        assert get_profile("site-audiences").fingerprint.cores == 8  # type: ignore[union-attr]
+
+        # 失效后立即拿到新值
+        invalidate_cache("site-audiences")
+        assert get_profile("site-audiences").fingerprint.cores == 16  # type: ignore[union-attr]
+
+        # 全量失效
+        invalidate_cache()
+        assert get_profile("site-audiences").fingerprint.cores == 16  # type: ignore[union-attr]

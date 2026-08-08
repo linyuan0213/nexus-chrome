@@ -14,6 +14,7 @@ from src.api.schemas import ApiResponse
 from src.fp.profile import FpProfile, RolloutRule
 from src.fp.signing import sign_payload
 from src.fp.store import store
+from src.fp.sync_client import invalidate_cache
 
 fp_router = APIRouter(prefix="/api", tags=["fingerprint"])
 
@@ -82,6 +83,7 @@ async def get_versions(profile_id: str):
 async def create_or_update(body: FpProfile):
     """创建 / 更新画像，version 自动 +1。"""
     result = store.create_or_update(body.model_dump())
+    invalidate_cache(body.profile_id)
     return ApiResponse(code=0, message="ok", data=result)
 
 
@@ -91,6 +93,7 @@ async def rollback(profile_id: str, to_version: int = Query(ge=1)):
     result = store.rollback(profile_id, to_version)
     if not result:
         raise HTTPException(status_code=404, detail="version not found")
+    invalidate_cache(profile_id)
     return ApiResponse(code=0, message="ok", data=result)
 
 
@@ -100,6 +103,7 @@ async def gray(profile_id: str, rollout: RolloutRule):
     result = store.update_rollout(profile_id, rollout)
     if not result:
         raise HTTPException(status_code=404, detail="profile not found")
+    invalidate_cache(profile_id)
     return ApiResponse(code=0, message="ok", data=result)
 
 

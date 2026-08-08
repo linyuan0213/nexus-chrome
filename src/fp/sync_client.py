@@ -81,6 +81,17 @@ def get_profile(profile_id: str, use_cache: bool = True, ttl: int = 300) -> Opti
     return profile
 
 
+def invalidate_cache(profile_id: Optional[str] = None) -> None:
+    """使画像内存缓存失效。profile_id=None 时清空全部。
+
+    画像更新/回滚/灰度变更后必须调用，否则 TTL（300s）内新会话仍拿到旧 env。
+    """
+    if profile_id is None:
+        _CACHE.clear()
+    else:
+        _CACHE.pop(profile_id, None)
+
+
 def _verify(data: Dict[str, object], version: int, signature: str, secret: str) -> bool:
     if not signature:
         return False
