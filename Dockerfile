@@ -102,13 +102,9 @@ RUN set -eux; \
 COPY scripts/fontconfig-ms-office-aliases.conf /etc/fonts/conf.d/60-ms-office-aliases.conf
 
 # noVNC 静态资源（每个实例的 websockify 都会 --web 指向这里，供浏览器直接访问）
-RUN set -eux; \
-    git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC; \
-    git clone --depth 1 https://github.com/novnc/websockify /opt/noVNC/utils/websockify; \
-    ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html; \
-    # 默认 Local scaling：画布缩放铺满查看标签页，避免四周黑底（替换失败则报错，防上游变动静默失效）
-    sed -i "s/UI.initSetting('resize', 'off')/UI.initSetting('resize', 'scale')/" /opt/noVNC/app/ui.js; \
-    grep -q "UI.initSetting('resize', 'scale')" /opt/noVNC/app/ui.js
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC && \
+    git clone --depth 1 https://github.com/novnc/websockify /opt/noVNC/utils/websockify && \
+    ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
 
 # 应用代码最后拷贝：源码改动不使依赖层/系统层缓存失效
 COPY . /app/
