@@ -149,12 +149,15 @@ docker build -t nexus-chrome-novnc .
 
 ```bash
 docker run --shm-size=2g \
+  --cap-add=SYS_NICE \
   -e VNC_PASSWORD=your_password \
   -p 9850:9850 \
   -p 5900-5910:5900-5910 \
   -p 6080-6100:6080-6100 \
   -d nexus-chrome-novnc
 ```
+
+> `--cap-add=SYS_NICE`：允许 Chrome 调整渲染进程优先级（容器默认无此 capability，当前发布版本的 DCHECK 会因 setpriority EPERM 崩溃）。
 
 ### 网页 VNC 访问
 
@@ -255,6 +258,7 @@ Chrome 的 `--user-data-dir` 会不断写入缓存、IndexedDB、Local Storage�
 
 ```bash
 docker run --shm-size=2g \
+  --cap-add=SYS_NICE \
   -e VNC_PASSWORD=your_password \
   -e USER_DATA_PATH=/tmp/nexus-chrome/user_data \
   -e CLEANUP_ENABLED=true \
