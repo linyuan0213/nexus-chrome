@@ -6,6 +6,8 @@ patched Chromium 的 fp_config.h 在 Blink 渲染进程通过 getenv 读取这�
 
 from typing import Dict, Optional
 
+from loguru import logger
+
 from src.fp.profile import FingerprintFields
 
 # Profile 字段 → 环境变量名
@@ -48,6 +50,32 @@ ENV_MAP: Dict[str, str] = {
 LIST_ENV_MAP: Dict[str, str] = {
     "languages": "FP_LANGS",
     "font_block": "FP_FONT_BLOCK",
+    "webgl_extensions_remove": "FP_WEBGL_EXTENSIONS_REMOVE",
+}
+
+# WebGL 参数友好名 → 十进制 GLenum（仅允许返回标量的 MAX_* 类参数）
+WEBGL_PARAM_ENUMS: Dict[str, int] = {
+    "MAX_TEXTURE_SIZE": 3379,
+    "MAX_VIEWPORT_DIMS": 3386,
+    "MAX_3D_TEXTURE_SIZE": 32883,
+    "MAX_RENDERBUFFER_SIZE": 34024,
+    "MAX_TEXTURE_MAX_ANISOTROPY": 34047,
+    "MAX_CUBE_MAP_TEXTURE_SIZE": 34076,
+    "MAX_VERTEX_ATTRIBS": 34921,
+    "MAX_TEXTURE_IMAGE_UNITS": 34930,
+    "MAX_ARRAY_TEXTURE_LAYERS": 35071,
+    "MAX_VERTEX_UNIFORM_BLOCKS": 35371,
+    "MAX_FRAGMENT_UNIFORM_BLOCKS": 35373,
+    "MAX_UNIFORM_BUFFER_BINDINGS": 35375,
+    "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 35660,
+    "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 35661,
+    "MAX_VARYING_COMPONENTS": 35659,
+    "MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS": 35979,
+    "MAX_SAMPLES": 36183,
+    "MAX_ELEMENT_INDEX": 36203,
+    "MAX_VERTEX_UNIFORM_VECTORS": 36347,
+    "MAX_VARYING_VECTORS": 36348,
+    "MAX_FRAGMENT_UNIFORM_VECTORS": 36349,
 }
 
 
@@ -72,4 +100,18 @@ def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None)
         value = getattr(fingerprint, key)
         if value:
             env[var] = ",".join(value)
+    # WebGL 标量参数覆盖 → "十进制GLenum:值,..."（未知名跳过并告警）
+    if fingerprint.webgl_params:
+        pairs: list[str] = []
+        for name, val in fingerprint.webgl_params.items():
+            enum = WEBGL_PARAM_ENUMS.get(name)
+            if enum is None:
+                logger.warning(f"[fp] 未知 WebGL 参数名 {name}，已跳过")
+                continue
+            pairs.append(f"{enum}:{val}")
+        if pairs:
+            env["FP_WEBGL_PARAMS"] = ",".join(pairs)
+    # MAX_VIEWPORT_DIMS 二维覆盖
+    if len(fingerprint.webgl_viewport_dims) == 2:
+        env["FP_WEBGL_VIEWPORT_DIMS"] = f"{fingerprint.webgl_viewport_dims[0]},{fingerprint.webgl_viewport_dims[1]}"
     return env

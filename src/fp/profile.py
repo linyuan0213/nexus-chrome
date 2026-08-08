@@ -3,7 +3,7 @@
 与 docs/fp_config_center_api.md 中的 Profile schema 对应。
 """
 
-from typing import List
+from typing import Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,11 @@ class FingerprintFields(BaseModel):
     uad_platform_version: str = ""
     uad_arch: str = "x86"
     uad_model: str = ""
+    # WebGL 深度伪装（对齐真实 GPU，消除软渲染签名）：
+    # webgl_params 键为友好名（MAX_TEXTURE_SIZE 等，见 render.WEBGL_PARAM_ENUMS）
+    webgl_params: Dict[str, int] = Field(default_factory=dict)
+    webgl_viewport_dims: List[int] = Field(default_factory=list[int])
+    webgl_extensions_remove: List[str] = Field(default_factory=list)
 
 
 class RolloutRule(BaseModel):

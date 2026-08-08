@@ -82,6 +82,34 @@ class TestRenderEnv:
         env = render_env(profile.fingerprint)
         assert "FP_RTC_IP" not in env
 
+    def test_webgl_params_rendered_as_enum_pairs(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_params = {"MAX_TEXTURE_SIZE": 16384, "MAX_SAMPLES": 8}
+        env = render_env(profile.fingerprint)
+        pairs = dict(p.split(":") for p in env["FP_WEBGL_PARAMS"].split(","))
+        assert pairs == {"3379": "16384", "36183": "8"}
+
+    def test_webgl_params_unknown_name_skipped(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_params = {"NOT_A_PARAM": 1, "MAX_SAMPLES": 4}
+        env = render_env(profile.fingerprint)
+        assert env["FP_WEBGL_PARAMS"] == "36183:4"
+
+    def test_webgl_viewport_dims(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_viewport_dims = [32767, 32767]
+        env = render_env(profile.fingerprint)
+        assert env["FP_WEBGL_VIEWPORT_DIMS"] == "32767,32767"
+        # 长度不为 2 时不输出
+        profile.fingerprint.webgl_viewport_dims = [1]
+        assert "FP_WEBGL_VIEWPORT_DIMS" not in render_env(profile.fingerprint)
+
+    def test_webgl_extensions_remove(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_extensions_remove = ["WEBGL_compressed_texture_astc"]
+        env = render_env(profile.fingerprint)
+        assert env["FP_WEBGL_EXTENSIONS_REMOVE"] == "WEBGL_compressed_texture_astc"
+
 
 class TestProfileStore:
     def setup_method(self):
