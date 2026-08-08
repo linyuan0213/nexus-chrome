@@ -9,7 +9,11 @@ from src.config.settings import (
 
 # HTML 片段
 CF_PAGE = "<html><head><title>Just a moment...</title></head><body><div id='cf-challenge-running'></div></body></html>"
-CF_BOX_PAGE = "<html><head><title>Example</title></head><body><input name='cf-turnstile-response'></body></html>"
+CF_BOX_PAGE = "<html><head><title>Just a moment...</title></head><body><form id='challenge-form'><input name='cf-turnstile-response'></form></body></html>"
+EMBEDDED_TURNSTILE_PAGE = (
+    "<html><head><title>签到</title></head><body><div class='cf-turnstile' data-sitekey='0x4AAAAAABfcR5-BOyur3FT4'>"
+    "<input type='hidden' name='cf-turnstile-response'></div></body></html>"
+)
 FIVE_SEC_PAGE = "<html><head><title>安全检查中...</title></head><body><div id='sec'>5</div></body></html>"
 LEICHI_PAGE = "<html><head><title>雷池</title></head><body><div id='safeline-block'></div></body></html>"
 NORMAL_PAGE = "<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"
@@ -32,11 +36,30 @@ class TestCloudflareDetect:
 
         assert _under_cf_box_challenge(CF_BOX_PAGE) is True
 
+    def test_embedded_turnstile_not_challenge(self):
+        """页面内嵌 Turnstile 组件（如签到页）不应被误判为 Cloudflare 挑战。"""
+        from src.challenge.cloudflare import _under_cf_box_challenge, _under_cf_challenge
+
+        assert _under_cf_challenge(EMBEDDED_TURNSTILE_PAGE) is False
+        assert _under_cf_box_challenge(EMBEDDED_TURNSTILE_PAGE) is False
+
     def test_no_detect_on_normal(self):
         from src.challenge.cloudflare import _under_cf_box_challenge, _under_cf_challenge
 
         assert _under_cf_challenge(NORMAL_PAGE) is False
         assert _under_cf_box_challenge(NORMAL_PAGE) is False
+        assert _under_cf_box_challenge(EMBEDDED_TURNSTILE_PAGE) is False
+
+    def test_precursor_script_not_interstitial(self):
+        """CF 前端正常页面加载 /cdn-cgi/challenge-platform/ 脚本不应被误判为拦截页。"""
+        from src.challenge.cloudflare import _under_cf_challenge
+
+        html = (
+            "<html><head><title>插画、漫画</title></head><body>"
+            "<script src='/cdn-cgi/challenge-platform/scripts/precursor/main.js'></script>"
+            "<p>正常内容</p></body></html>"
+        )
+        assert _under_cf_challenge(html) is False
 
     def test_challenge_type(self):
         from src.challenge.cloudflare import CloudflareResolver
@@ -127,3 +150,14 @@ class TestChallengeOrchestratorInit:
         result = orchestrator.resolve(tab)
         assert result["detected"] is False
         assert result["solved"] is True
+
+    def test_resolve_no_challenge_reports_embedded_turnstile(self):
+        from unittest.mock import MagicMock
+
+        from src.challenge.resolver import ChallengeOrchestrator
+
+        orchestrator = ChallengeOrchestrator(timeout=5)
+        tab = MagicMock()
+        tab.html = NORMAL_PAGE
+        result = orchestrator.resolve(tab)
+        assert "embedded_turnstile" in result

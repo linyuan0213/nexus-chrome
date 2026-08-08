@@ -10,6 +10,7 @@ class CreateSessionRequest(BaseModel):
     fingerprint_profile: str = Field("stealth", description="指纹配置: default / stealth / paranoid")
     user_agent: Optional[str] = Field(None, description="自定义 User-Agent")
     proxy: Optional[str] = Field(None, description="代理地址，如 http://user:pass@host:port")
+    fp_profile_id: Optional[str] = Field(None, description="指纹画像 ID（配置中心，启用 FP_* 环境变量）")
 
 
 class NavigateRequest(BaseModel):
@@ -23,6 +24,14 @@ class NavigateRequest(BaseModel):
 
 class ClickRequest(BaseModel):
     selector: str = Field(..., description="CSS 选择器或 XPath")
+    humanize: bool = Field(True, description="人性化轨迹移动后点击（对抗鼠标轨迹检测）")
+
+
+class DragRequest(BaseModel):
+    selector: str = Field(..., description="滑块元素选择器")
+    offset_x: int = Field(..., description="水平拖拽距离（像素）")
+    offset_y: int = Field(0, description="垂直拖拽距离（像素）")
+    duration: float = Field(1.0, description="拖拽时长（秒）")
 
 
 class InputRequest(BaseModel):
@@ -58,6 +67,39 @@ class RequestOperation(BaseModel):
 
 class CookiesQuery(BaseModel):
     domain: Optional[str] = Field(None, description="按域名过滤")
+
+
+class DownloadRequest(BaseModel):
+    url: str = Field(..., description="下载 URL")
+    save_path: Optional[str] = Field(None, description="保存路径（默认自动目录）")
+    timeout: int = Field(60, description="下载超时秒数")
+
+
+class ScreenshotRequest(BaseModel):
+    tab_name: Optional[str] = Field(None, description="标签页名称，None 用活动标签页")
+    full_page: bool = Field(False, description="True=整页截图")
+
+
+class CreateTabRequest(BaseModel):
+    name: Optional[str] = Field(None, description="标签页名称，不指定自动生成")
+    url: Optional[str] = Field(None, description="可选：创建后导航到此 URL")
+
+
+class SwitchTabRequest(BaseModel):
+    name: str = Field(..., description="目标标签页名称")
+
+
+class CloseTabRequest(BaseModel):
+    name: str = Field(..., description="标签页名称")
+
+
+class M3u8Request(BaseModel):
+    url: str = Field(..., description="m3u8 播放列表 URL")
+    timeout: int = Field(30, description="抓取超时秒数")
+
+
+class SetProxyRequest(BaseModel):
+    proxy: str = Field(..., description="代理地址，如 http://user:pass@host:port")
 
 
 class ApiResponse(BaseModel):

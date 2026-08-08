@@ -1,8 +1,7 @@
 .git
 .github
+.kilo
 *.deb
-*.so
-patched_libs
 .pytest_cache
 __pycache__
 *.pyc
@@ -15,3 +14,8 @@ __pycache__
 .ruff_cache
 .coverage
 .playwright-mcp
+
+# 本地工作目录不进镜像
+fp_patches/
+data/
+tmp/

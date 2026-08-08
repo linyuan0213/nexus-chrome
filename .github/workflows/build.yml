@@ -23,6 +23,8 @@ jobs:
         id: release_version
         run: |
           echo "app_version=$(echo $GITHUB_REF_NAME | sed 's/v\(.*\)/\1/')" >> $GITHUB_ENV
+          # 读取补丁版 Chrome 版本（GitHub Releases tag: chrome-<version>）
+          echo "chrome_version=$(cat .chrome-version | tr -d '[:space:]')" >> $GITHUB_ENV
 
       - name: Set Up QEMU
         uses: docker/setup-qemu-action@v4
@@ -48,6 +50,8 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            CHROME_VERSION=${{ env.chrome_version }}
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:latest
             ${{ secrets.DOCKER_USERNAME }}/nexus-chrome:${{ env.app_version }}

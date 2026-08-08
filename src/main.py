@@ -6,9 +6,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from loguru import logger
 
+from src.api.fp_profiles import fp_router
 from src.api.routes import sessions_router
 from src.config.settings import (
     APP_HOST,
@@ -22,20 +23,19 @@ from src.config.settings import (
     USER_DATA_PATH,
 )
 from src.core.browser_manager import browser_manager
-from src.core.session import session_manager
+from src.services.session_service import get_session_manager
 from src.utils.cleanup import cleanup_user_data_dir, get_directory_size
 
 
 async def _session_cleanup_loop():
     while True:
         await asyncio.sleep(SESSION_CLEANUP_INTERVAL)
-        if session_manager is not None:
-            try:
-                count = await asyncio.to_thread(session_manager.delete_expired)
-                if count:
-                    logger.info(f"清理 {count} 个过期会话")
-            except Exception as e:
-                logger.warning(f"清理过期会话失败: {e}")
+        try:
+            count = await asyncio.to_thread(get_session_manager().delete_expired)
+            if count:
+                logger.info(f"清理 {count} 个过期会话")
+        except Exception as e:
+            logger.warning(f"清理过期会话失败: {e}")
 
 
 async def _profile_cleanup_loop():
@@ -82,8 +82,9 @@ async def lifespan(app: FastAPI):
         profile_cleanup_task = asyncio.create_task(_profile_cleanup_loop())
 
     try:
-        # 触发浏览器预热，失败不影响服务启动
-        _ = browser_manager.browser
+        # 不再预热默认浏览器实例：实例按需创建（会话/指纹出现时才启动 Chrome），
+        # 避免容器启动即占用资源
+        pass
     except Exception as e:
         logger.warning(f"浏览器预热失败（不影响服务启动）: {e}")
     yield
@@ -109,6 +110,7 @@ app = FastAPI(
 )
 
 app.include_router(sessions_router)
+app.include_router(fp_router)
 
 
 @app.get("/")
@@ -128,6 +130,8 @@ async def root():
             "execute": "POST /sessions/{id}/execute",
             "fetch": "POST /sessions/{id}/fetch",
             "status": "GET /status",
+            "fp_profiles": "GET/POST /api/profiles",
+            "fp_heartbeat": "GET /api/nodes/{node_id}/heartbeat",
         },
     }
 
@@ -138,8 +142,57 @@ async def status():
         "status": "running",
         "version": APP_VERSION,
         "browser": "ready" if browser_manager.is_alive else "not_initialized",
+        "instances": browser_manager.list_instances(),
         "timestamp": datetime.datetime.now().isoformat(),
     }
+
+
+@app.get("/instances")
+async def instances():
+    """运行中的指纹 Chrome 实例列表（含每实例 VNC 端口，直连 noVNC 用）。"""
+    return {"instances": browser_manager.list_instances()}
+
+
+@app.delete("/instances/{key}")
+async def close_instance(key: str):
+    """手动关闭指定浏览器实例（释放内存）。默认实例不可关闭。"""
+    if key == "default":
+        return {"code": 1, "message": "默认实例不可关闭（可重启服务重建）"}
+    try:
+        browser_manager.close_instance(key, "手动关闭")
+        return {"code": 0, "message": f"实例 {key} 已关闭"}
+    except Exception as e:
+        return {"code": 1, "message": str(e)}
+
+
+@app.websocket("/ws/events")
+async def ws_events(websocket: WebSocket, types: str = "*"):
+    """WebSocket 事件推送：会话创建/删除等。
+
+    用法: ws://host:port/ws/events  （订阅全部）
+          ws://host:port/ws/events?types=session_created,session_deleted
+    """
+    from src.core.session import subscribe_events, unsubscribe_events
+
+    await websocket.accept()
+    event_types = [t.strip() for t in types.split(",") if t.strip()] or ["*"]
+    q = await subscribe_events(event_types)
+    try:
+        while True:
+            try:
+                payload = await asyncio.wait_for(q.get(), timeout=15.0)
+                await websocket.send_json(payload)
+            except asyncio.TimeoutError:
+                # 心跳保活
+                await websocket.send_json({"type": "ping"})
+    except Exception as e:
+        logger.debug(f"WebSocket 事件推送结束(连接断开): {e}")
+    finally:
+        unsubscribe_events(q, event_types)
+        try:
+            await websocket.close()
+        except Exception as e:
+            logger.debug(f"WebSocket 关闭失败(可忽略): {e}")
 
 
 def run() -> None:

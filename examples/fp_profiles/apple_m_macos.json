@@ -1,0 +1,37 @@
+{
+  "profile_id": "persona_apple_m",
+  "name": "Apple M 系列 (macOS, ANGLE Metal)",
+  "fingerprint": {
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "platform": "MacIntel",
+    "uad_platform": "macOS",
+    "uad_platform_version": "15.3.0",
+    "webgl_vendor": "Google Inc. (Apple)",
+    "webgl_renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+    "webgl_viewport_dims": [16384, 16384],
+    "webgl_params": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 4096,
+      "MAX_VARYING_VECTORS": 31,
+      "MAX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 80,
+      "MAX_TEXTURE_MAX_ANISOTROPY": 16,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_SAMPLES": 4,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 24,
+      "MAX_VERTEX_UNIFORM_BLOCKS": 12,
+      "MAX_FRAGMENT_UNIFORM_BLOCKS": 12,
+      "MAX_ELEMENT_INDEX": 4294967294
+    },
+    "webgl_extensions_remove": [
+      "WEBGL_compressed_texture_etc1",
+      "WEBGL_compressed_texture_pvrtc"
+    ]
+  }
+}

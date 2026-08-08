@@ -1,10 +1,10 @@
-"""HTTP 客户端 — 基于 httpx，与 Session 的 CookieStore 双向同步 Cookie。"""
+"""HTTP 客户端 — 基于 httpx2，与 Session 的 CookieStore 双向同步 Cookie。"""
 
 from http.cookies import SimpleCookie
 from typing import Any, Dict, List, Optional, cast
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from loguru import logger
 
 
@@ -38,7 +38,7 @@ class HttpClient:
             timeout = self.base_timeout
 
         try:
-            with httpx.Client(
+            with httpx2.Client(
                 timeout=timeout,
                 follow_redirects=follow_redirects,
                 max_redirects=self.max_redirects,
@@ -70,7 +70,7 @@ class HttpClient:
             }
 
     @staticmethod
-    def _update_cookie_store(response: httpx.Response, url: str, cookie_store: Any) -> None:
+    def _update_cookie_store(response: httpx2.Response, url: str, cookie_store: Any) -> None:
         """把响应中的 Set-Cookie 写回 CookieStore。"""
         if cookie_store is None:
             return
