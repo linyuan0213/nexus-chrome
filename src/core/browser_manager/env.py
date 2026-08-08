@@ -56,6 +56,9 @@ def base_fp_env() -> Dict[str, str]:
         "FP_WEBGL_RENDERER": "ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.5 (Core Profile) Mesa 25.0.7)",
         "FP_GL_MAX_TEXTURE_SIZE": "16384",
         "FP_WEBRTC_REPLACE_HOST_IP": "1",
+        # 桌面有线网络典型值（容器无真实网络质量信号，NQE 默认会给出弱网值）
+        "FP_NET_RTT": "50",
+        "FP_NET_DOWNLINK": "10",
         # 屏幕尺寸与窗口/Xvfb 一致（VNC 可见性 + 指纹自洽）
         "FP_SCREEN_WIDTH": str(WINDOW_WIDTH),
         "FP_SCREEN_HEIGHT": str(WINDOW_HEIGHT),
