@@ -26,7 +26,7 @@ class TestCreateSessionRequest:
             fingerprint_profile="paranoid",
             user_agent="Mozilla/5.0",
             proxy="http://127.0.0.1:8080",
-        )
+        )  # type: ignore[call-arg]
         assert req.fingerprint_profile == "paranoid"
         assert req.proxy == "http://127.0.0.1:8080"
 
@@ -60,7 +60,7 @@ class TestNavigateRequest:
 
 class TestClickRequest:
     def test_valid(self):
-        req = ClickRequest(selector="#btn")
+        req = ClickRequest(selector="#btn")  # type: ignore[call-arg]
         assert req.selector == "#btn"
 
 

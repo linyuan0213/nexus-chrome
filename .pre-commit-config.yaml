@@ -10,7 +10,7 @@ repos:
     hooks:
       - id: pyright
         name: pyright
-        entry: uv run pyright
+        entry: uv run pyright src/ tests/
         language: system
         types: [python]
-        pass_filenames: true
+        pass_filenames: false
