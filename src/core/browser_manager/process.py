@@ -76,15 +76,10 @@ def build_chrome_args(
             ]
         )
     elif CHROME_RENDER_MODE == "vulkan":
-        # SwANGLE：SwiftShader 软件 Vulkan，无需 GPU。
-        # 指纹比 legacy swiftshader-webgl 真实（attribs=16 等），
-        # 需 --enable-unsafe-swiftshader 绕过 WebGL 黑名单。
-        args.extend(
-            [
-                "--use-angle=vulkan",
-                "--enable-unsafe-swiftshader",
-            ]
-        )
+        # 不强制 use-angle，让 Chrome 选默认 ANGLE 后端（构建机 headless 实测
+        # 此配置下 WebGL caps 可被 fp_config 覆盖，attribs=16）。仅需
+        # --enable-unsafe-swiftshader 绕过 WebGL 黑名单。
+        args.extend(["--enable-unsafe-swiftshader"])
     args.extend(fp.get_browser_args())
     disable_features = set(fp.get_disable_features())
     disable_features.update(
