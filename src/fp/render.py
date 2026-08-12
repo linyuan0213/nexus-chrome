@@ -4,7 +4,7 @@ patched Chromium 的 fp_config.h 在 Blink 渲染进程通过 getenv 读取这�
 （渲染进程继承浏览器进程环境）。列表字段用逗号连接。
 """
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from loguru import logger
 
@@ -79,6 +79,58 @@ WEBGL_PARAM_ENUMS: Dict[str, int] = {
 }
 
 
+def _detect_platform(fingerprint: FingerprintFields) -> str:
+    """从画像字段推断目标平台：macos / windows / linux。"""
+    p = (fingerprint.platform or "").lower()
+    ua = (fingerprint.ua or "").lower()
+    if "mac" in p or "macintosh" in ua or "mac os" in ua:
+        return "macos"
+    if "win" in p or "windows" in ua:
+        return "windows"
+    return "linux"
+
+
+def _auto_webgl_params(fingerprint: FingerprintFields) -> Dict[str, int]:
+    """画像未显式设置 webgl_params 时，按目标 GPU 平台自动生成自洽参数。
+
+    所有真实 GPU 都满足的基础值 + 平台差异值。不含 MAX_RENDERBUFFER_SIZE
+    （上越声明曾在 legacy 渲染路径触发 GPU 段错误）。
+    """
+    platform = _detect_platform(fingerprint)
+    params: Dict[str, int] = {
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+        "MAX_VARYING_VECTORS": 31,
+        "MAX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_SAMPLES": 4,
+        "MAX_ELEMENT_INDEX": 4294967294,
+    }
+    if platform == "windows":
+        # ANGLE D3D11：fragment 常量 1024、组合纹理单元 32、viewport 32767
+        params["MAX_FRAGMENT_UNIFORM_VECTORS"] = 1024
+        params["MAX_COMBINED_TEXTURE_IMAGE_UNITS"] = 32
+        params["MAX_VARYING_COMPONENTS"] = 120
+        params["MAX_UNIFORM_BUFFER_BINDINGS"] = 24
+    elif platform == "macos":
+        # ANGLE Metal：fragment 常量 4096、组合纹理单元 80
+        params["MAX_FRAGMENT_UNIFORM_VECTORS"] = 4096
+        params["MAX_COMBINED_TEXTURE_IMAGE_UNITS"] = 80
+    else:  # linux / Mesa
+        params["MAX_FRAGMENT_UNIFORM_VECTORS"] = 4096
+        params["MAX_COMBINED_TEXTURE_IMAGE_UNITS"] = 192
+    return params
+
+
+def _auto_viewport_dims(fingerprint: FingerprintFields) -> List[int]:
+    """画像未设 webgl_viewport_dims 时按平台生成：Windows/D3D11 32767，其余 16384。"""
+    return [32767, 32767] if _detect_platform(fingerprint) == "windows" else [16384, 16384]
+
+
 def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None) -> Dict[str, str]:
     """将指纹参数渲染为 FP_* 环境变量字典（不含空值）。
 
@@ -101,9 +153,13 @@ def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None)
         if value:
             env[var] = ",".join(value)
     # WebGL 标量参数覆盖 → "十进制GLenum:值,..."（未知名跳过并告警）
-    if fingerprint.webgl_params:
+    webgl_params = fingerprint.webgl_params
+    if not webgl_params and (fingerprint.webgl_renderer or fingerprint.platform):
+        webgl_params = _auto_webgl_params(fingerprint)
+        logger.debug(f"[fp] 画像未设 webgl_params，按 {_detect_platform(fingerprint)} 自动生成: {sorted(webgl_params)}")
+    if webgl_params:
         pairs: list[str] = []
-        for name, val in fingerprint.webgl_params.items():
+        for name, val in webgl_params.items():
             enum = WEBGL_PARAM_ENUMS.get(name)
             if enum is None:
                 logger.warning(f"[fp] 未知 WebGL 参数名 {name}，已跳过")
@@ -111,7 +167,10 @@ def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None)
             pairs.append(f"{enum}:{val}")
         if pairs:
             env["FP_WEBGL_PARAMS"] = ",".join(pairs)
-    # MAX_VIEWPORT_DIMS 二维覆盖
-    if len(fingerprint.webgl_viewport_dims) == 2:
-        env["FP_WEBGL_VIEWPORT_DIMS"] = f"{fingerprint.webgl_viewport_dims[0]},{fingerprint.webgl_viewport_dims[1]}"
+    # MAX_VIEWPORT_DIMS 二维覆盖（画像未设时按平台自动生成）
+    viewport_dims = fingerprint.webgl_viewport_dims
+    if len(viewport_dims) != 2 and (fingerprint.webgl_renderer or fingerprint.platform):
+        viewport_dims = _auto_viewport_dims(fingerprint)
+    if len(viewport_dims) == 2:
+        env["FP_WEBGL_VIEWPORT_DIMS"] = f"{viewport_dims[0]},{viewport_dims[1]}"
     return env
