@@ -51,6 +51,3 @@
 - README 同步重构后的架构、完整端点清单与配置说明
 - 质量治理：pyright strict 0 错误、ruff 0 错误、159 测试通过
 
-## [Unreleased]
-
-- （待补充）
