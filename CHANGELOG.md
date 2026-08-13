@@ -2,6 +2,27 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.2.5] - 2026-08-12
+
+### 修复
+
+- **`CF_WIDGET_FIX_JS` 清空（根治 WebGL 参数覆盖失效）**：旧版 JS monkey-patch 在 `getParameter` 层硬编码 `MAX_VERTEX_ATTRIBS=256`、viewport=32768 等，拦截所有 C++ 层覆盖。清空后 attribs=16、viewport=16384 正常生效
+- **指纹配置经命令行开关传递**：Chrome 会剥离渲染/GPU 子进程的环境变量，`FP_*` 无法经 `getenv` 到达 WebGL caps 补丁。改为 `--fp-env-*` 小写开关传递（Chrome 保留开关给所有子进程）
+- **vulkan 渲染模式**：headful X11 下 Chrome 默认选的 legacy `--use-angle=swiftshader-webgl` 可被 Google reCAPTCHA 检测（库不初始化）。显式 `--use-angle=vulkan`（SwANGLE）后 reCAPTCHA v3 评分 0.9（human）
+- **Managed Challenge 优先于 Turnstile 盒挑战**：托管拦截页误判为盒挑战导致误点超时
+- **CI pyright 修复**：pydantic 模型 `__init__` 误报统一处理，pre-commit 与 CI 检查范围对齐
+
+### 新功能
+
+- **画像 WebGL 参数自动生成**：画像未设 `webgl_params` 时按目标平台（macOS/Metal、Windows/D3D11、Linux/Mesa）自动生成自洽能力值，无需手动配置
+
+### 指纹检测（CloakBrowser 基准）
+
+- reCAPTCHA v3：**0.9（human）**
+- Cloudflare Turnstile / FingerprintJS / BrowserScan：**全部 PASS**
+- incolumitas：1 fail（WEBDRIVER spec，W3C 规范测试）
+- TLS 指纹：cipher 哈希与真实 Chrome 一致
+
 ## [v3.2.4] - 2026-08-08
 
 ### 架构重构
@@ -30,6 +51,3 @@
 - README 同步重构后的架构、完整端点清单与配置说明
 - 质量治理：pyright strict 0 错误、ruff 0 错误、159 测试通过
 
-## [Unreleased]
-
-- （待补充）

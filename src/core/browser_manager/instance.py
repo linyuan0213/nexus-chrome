@@ -183,8 +183,18 @@ class ChromeInstance:
         args = [
             chrome,
             *build_chrome_args(DEFAULT_FINGERPRINT_PROFILE, self.user_data_dir, self.port, self.screen_size),
-            "about:blank",
         ]
+        # 指纹配置以命令行开关传递（--fp-env-<NAME>=value）：
+        # Chrome 会过滤渲染/GPU 子进程的环境变量，而开关会透传给所有子进程，
+        # 保证 WebGL caps 等需要在渲染进程读取 FP_* 的补丁可靠生效。
+        # 只传无空格的 WebGL 参数开关（UA/renderer 等含空格的值走 CDP/其他通道，
+        # 否则空格会被子进程命令行解析拆开导致崩溃）。
+        # 开关名必须全小写（Chromium IsSwitchNameValid: ToLowerASCII==self）。
+        for key in ("FP_WEBGL_PARAMS", "FP_WEBGL_VIEWPORT_DIMS", "FP_WEBGL_EXTENSIONS_REMOVE"):
+            value = self.fp_env.get(key)
+            if value:
+                args.append(f"--fp-env-{key.lower()}={value}")
+        args.append("about:blank")
         logger.debug(f"[fp:{self.key}] 启动 Chrome 参数: {args[:6]}...")
         chrome_stderr_path = f"{self.user_data_dir}/chrome_stderr.log"
         os.makedirs(os.path.dirname(chrome_stderr_path), exist_ok=True)

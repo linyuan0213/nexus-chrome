@@ -112,12 +112,15 @@ class CloudflareResolver(ChallengeResolver):
         if not _under_cf_challenge(html):
             return True
 
-        # Turnstile 盒子挑战优先：很多拦截页（含托管脚本）仍需点击盒子内复选框。
-        if _under_cf_box_challenge(html):
-            return self._solve_box(tab, timeout)
-
+        # Managed Challenge（JS 自动求解）优先：托管拦截页也常内嵌
+        # cf-turnstile-response，会误判为盒挑战，但托管页没有可点的复选框，
+        # 只需等待 JS 自动完成，点击反而超时。
         if _is_managed_challenge(html):
             return self._wait_managed(tab, timeout)
+
+        # Turnstile 盒子挑战：需点击盒子内复选框（非托管拦截页）。
+        if _under_cf_box_challenge(html):
+            return self._solve_box(tab, timeout)
 
         return self._solve_standard(tab, timeout)
 

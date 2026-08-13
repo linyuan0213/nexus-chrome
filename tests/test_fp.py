@@ -100,15 +100,46 @@ class TestRenderEnv:
         profile.fingerprint.webgl_viewport_dims = [32767, 32767]
         env = render_env(profile.fingerprint)
         assert env["FP_WEBGL_VIEWPORT_DIMS"] == "32767,32767"
-        # 长度不为 2 时不输出
+        # 长度不为 2（显式无效）时回退到按平台自动生成
         profile.fingerprint.webgl_viewport_dims = [1]
-        assert "FP_WEBGL_VIEWPORT_DIMS" not in render_env(profile.fingerprint)
+        env2 = render_env(profile.fingerprint)
+        assert env2["FP_WEBGL_VIEWPORT_DIMS"] == "16384,16384"  # Linux/Mesa 平台
 
     def test_webgl_extensions_remove(self):
         profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
         profile.fingerprint.webgl_extensions_remove = ["WEBGL_compressed_texture_astc"]
         env = render_env(profile.fingerprint)
         assert env["FP_WEBGL_EXTENSIONS_REMOVE"] == "WEBGL_compressed_texture_astc"
+
+    def test_auto_webgl_params_when_not_set(self):
+        """画像未设 webgl_params 时自动按平台生成自洽参数。"""
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_params = {}
+        profile.fingerprint.webgl_viewport_dims = []
+        profile.fingerprint.platform = "MacIntel"
+        env = render_env(profile.fingerprint)
+        pairs = dict(p.split(":") for p in env["FP_WEBGL_PARAMS"].split(","))
+        assert pairs["34921"] == "16"  # MAX_VERTEX_ATTRIBS
+        assert pairs["36203"] == "4294967294"  # MAX_ELEMENT_INDEX
+        assert env["FP_WEBGL_VIEWPORT_DIMS"] == "16384,16384"  # macOS
+
+    def test_auto_webgl_params_windows_viewport(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_params = {}
+        profile.fingerprint.webgl_viewport_dims = []
+        profile.fingerprint.platform = "Win32"
+        env = render_env(profile.fingerprint)
+        pairs = dict(p.split(":") for p in env["FP_WEBGL_PARAMS"].split(","))
+        assert pairs["36349"] == "1024"  # D3D11 MAX_FRAGMENT_UNIFORM_VECTORS
+        assert env["FP_WEBGL_VIEWPORT_DIMS"] == "32767,32767"  # D3D11
+
+    def test_explicit_webgl_params_takes_precedence(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.webgl_params = {"MAX_SAMPLES": 4}
+        profile.fingerprint.platform = "MacIntel"
+        env = render_env(profile.fingerprint)
+        assert env["FP_WEBGL_PARAMS"] == "36183:4"
+        assert "34921" not in env["FP_WEBGL_PARAMS"]
 
 
 class TestProfileStore:
