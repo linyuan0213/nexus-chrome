@@ -75,6 +75,12 @@ def build_chrome_args(
                 "--enable-unsafe-swiftshader",
             ]
         )
+    elif CHROME_RENDER_MODE == "vulkan":
+        # SwANGLE（SwiftShader 软件 Vulkan）：与 headless 默认一致。
+        # headful X11 下 Chrome 会自动选 legacy --use-angle=swiftshader-webgl
+        # （可被 Google recaptcha 等检测），必须显式指定 vulkan 后端。
+        # --enable-unsafe-swiftshader 绕过 WebGL 黑名单。
+        args.extend(["--use-angle=vulkan", "--enable-unsafe-swiftshader"])
     args.extend(fp.get_browser_args())
     disable_features = set(fp.get_disable_features())
     disable_features.update(

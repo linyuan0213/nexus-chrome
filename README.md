@@ -140,6 +140,24 @@ uv run python main.py
 
 镜像构建时自动从 GitHub Releases 下载 patched Chromium（版本由 `.chrome-version` 锁定）。
 
+推荐使用仓库内 `docker-compose.yml` 一键部署（构建 + 数据卷 + 共享内存 + 端口）：
+
+```bash
+docker compose up -d --build
+```
+
+或在 Nexus Media 侧以服务编排方式部署，之后在 **系统设置 → 实验室** 配置：
+
+```yaml
+laboratory:
+  chrome_enabled: true
+  chrome_server_host: "http://<本机IP>:9850"   # 填 nexus-chrome 所在主机
+```
+
+Agent 的 `browser_fetch` / `browser_screenshot` 工具即调用该服务；首次使用请在浏览器自动化页面登录站点并同步指纹，之后工具可携带站点 Cookie 访问登录后页面。
+
+手动部署：
+
 1. 构建镜像：
 ```bash
 docker build -t nexus-chrome-novnc .
@@ -203,6 +221,38 @@ curl -X POST http://localhost:9850/sessions/work/fetch \
   -d '{"url": "https://protected-site.com/api/search?q=test"}'
 ```
 
+### 指纹画像
+
+创建画像后，会话绑定 `fp_profile_id` 即注入完整指纹（UA / platform / WebGL / cores / 时区等）。
+
+```bash
+# 创建 macOS 自洽画像（WebGL 参数自动按平台生成）
+curl -X POST http://localhost:9850/api/profiles \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profile_id": "mac_work",
+    "name": "macOS 自洽指纹",
+    "fingerprint": {
+      "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "platform": "MacIntel",
+      "uad_platform": "macOS",
+      "webgl_vendor": "Google Inc. (Apple)",
+      "webgl_renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+      "cores": 4,
+      "memory": 8.0
+    }
+  }'
+
+# 用画像创建会话
+curl -X POST http://localhost:9850/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "mac", "fp_profile_id": "mac_work"}'
+```
+
+画像未显式设置 `webgl_params` 时，服务端按目标平台自动生成自洽的 WebGL 能力值（`MAX_VERTEX_ATTRIBS=16`、`MAX_ELEMENT_INDEX=4294967294`、viewport 按平台等），无需手动配置。显式设置优先。
+
+> 注意：画像的 `cores` 应与宿主机实际核数一致（可被实测并行度戳穿），UA 版本应与浏览器二进制版本一致（避免 HTTP 头与 JS 版本不一致）。
+
 ### 交互操作（签到等）
 
 ```bash
@@ -217,6 +267,47 @@ curl -X POST http://localhost:9850/sessions/work/click \
   -d '{"selector": "#submit"}'
 ```
 
+## 指纹测试结果
+
+针对 CloakBrowser 基准的 10 项在线检测，当前构建（vulkan 渲染 + C++ 编译期指纹）实测结果与 CloakBrowser 同级：
+
+| 检测项 | Stock Playwright | CloakBrowser | **Nexus Chrome** |
+|---|---|---|---|
+| reCAPTCHA v3 | 0.1 (bot) | 0.9 (human) | **0.9 (human)** ✓ |
+| Cloudflare Turnstile (managed) | FAIL | PASS | **PASS**（javlibrary ~2s） |
+| FingerprintJS bot detection | DETECTED | PASS | **PASS**（`bot: not_detected`） |
+| BrowserScan bot detection | DETECTED | NORMAL | **NoDetection**，真实性 90% |
+| bot.incolumitas.com | 13 fails | 1 fail | **1 fail**（WEBDRIVER spec） |
+| navigator.webdriver | true | false | **false** |
+| navigator.plugins.length | 0 | 5 | **5** |
+| window.chrome | undefined | object | **object** |
+| UA 字符串 | HeadlessChrome | Chrome | **Chrome/153 无泄漏** |
+| CDP 检测 | Detected | Not detected | **cdc_ 未定义** |
+| TLS 指纹 | Mismatch | 与 Chrome 一致 | **cipher 哈希与 Chrome 一致** |
+
+### 说明
+
+- **incolumitas 的 1 个 fail 是 W3C WebDriver 规范测试**（`WEBDRIVER`），连 CloakBrowser 都过不了，属预期
+- BrowserScan 90% 中 -10% 为 SwiftShader 软渲染 vs 声称 GPU 的固有差距（WebGL exception / vendors vary），需真实 Apple/GPU 硬件才能到 100%
+- 可配置项：`canvas_noise` / `audio_noise` 保持 `false`（开启会被 BrowserScan 标记为"函数被修改"，-15%）
+
+### 复测方式
+
+```bash
+# 建会话绑定画像后依次导航检测站，用 execute 提取结果
+curl -X POST http://localhost:9850/sessions -d '{"session_id":"t","fp_profile_id":"mac_work"}'
+curl -X POST http://localhost:9850/sessions/t/navigate \
+  -d '{"url":"https://demo.fingerprint.com/playground","timeout":40}'   # FingerprintJS
+curl -X POST http://localhost:9850/sessions/t/navigate \
+  -d '{"url":"https://browserscan.net/","timeout":40}'                  # BrowserScan
+curl -X POST http://localhost:9850/sessions/t/navigate \
+  -d '{"url":"https://bot.incolumitas.com/","timeout":40}'              # incolumitas
+curl -X POST http://localhost:9850/sessions/t/navigate \
+  -d '{"url":"https://www.javlibrary.com/tw/","timeout":60}'            # Cloudflare managed
+```
+
+reCAPTCHA v3 评分验证：在 `recaptcha-demo.appspot.com/recaptcha-v3-request-scores.php` 页执行 `grecaptcha.enterprise.execute` 取 token，POST 至 `/recaptcha-v3-verify.php?action=examples/v3scores&token=...`，响应 `score` 字段即评分（实测 0.9）。
+
 ## 配置
 
 环境变量：
@@ -224,6 +315,8 @@ curl -X POST http://localhost:9850/sessions/work/click \
 - `APP_PORT`: 服务器端口（默认：9850）
 - `CHROME_PATH`: 自定义 Chrome 浏览器路径（容器内默认 `/opt/patched-chrome/chrome`）
 - `HEADLESS_MODE`: 无头模式（默认：`--headless=new`）
+- `CHROME_RENDER_MODE`: 渲染后端（`vulkan` / `swiftshader` / `auto`）。**推荐 `vulkan`**（SwiftShader 软件 Vulkan/SwANGLE）：headful X11 下 Chrome 默认选的 legacy `swiftshader-webgl` 可被 Google reCAPTCHA 等检测，显式 `vulkan` 后指纹真实且过检测
+- `VK_ICD_FILENAMES`: SwiftShader Vulkan ICD 路径（vulkan 模式需指向 `/opt/patched-chrome/vk_swiftshader_icd.json`）
 - `REMOTE_CHROME_ADDRESS`: 远程 Chrome CDP 地址，如 `127.0.0.1:9222`
 - `VNC_PASSWORD`: VNC 密码（部署时必须修改，禁止默认值）
 - `CHALLENGE_TIMEOUT`: 挑战等待超时（默认：60 秒）

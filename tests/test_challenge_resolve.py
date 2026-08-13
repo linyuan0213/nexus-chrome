@@ -154,8 +154,12 @@ class TestSolveEmbeddedWidget:
 
 
 class TestCloudflareResolveOrder:
-    def test_box_challenge_preferred_over_managed(self):
-        """拦截页同时是盒子挑战与托管挑战时，优先走盒子点击。"""
+    def test_managed_challenge_preferred_over_box(self):
+        """拦截页同时是托管挑战与盒子挑战时，优先走托管等待。
+
+        托管拦截页（Managed Challenge）虽常内嵌 cf-turnstile-response，
+        但没有可点击的复选框，点击会超时；应等待 JS 自动求解。
+        """
         from src.challenge.cloudflare import CloudflareResolver
 
         tab = MagicMock()
@@ -176,7 +180,26 @@ class TestCloudflareResolveOrder:
                 lambda self, t, timeout: called.append(True) or True,
             )
             assert resolver.resolve(tab, timeout=3) is True
-        assert called == [], "盒子挑战存在时不应先走托管等待"
+        assert called == [True], "托管挑战存在时应先走托管等待，而非点击盒子"
+
+    def test_box_challenge_when_not_managed(self):
+        """非托管拦截页上的 Turnstile 盒子挑战仍应点击盒子。"""
+        from src.challenge.cloudflare import CloudflareResolver
+
+        tab = MagicMock()
+        # 拦截页 + Turnstile 复选框，但不含 challenges.cloudflare.com（非托管）
+        tab.html = "<html><head><title>请稍候…</title></head><body><input name='cf-turnstile-response'></body></html>"
+        resolver = CloudflareResolver()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(CloudflareResolver, "_solve_box", lambda self, t, timeout: True)
+            called = []
+            mp.setattr(
+                CloudflareResolver,
+                "_wait_managed",
+                lambda self, t, timeout: called.append(True) or True,
+            )
+            assert resolver.resolve(tab, timeout=3) is True
+        assert called == [], "非托管拦截页应走盒子点击，而非托管等待"
 
     def test_multi_layer_cf_then_leichi(self):
         """两层 WAF：先 CF 拦截页，解决后跳转到雷池拦截页，应逐层解决。"""
