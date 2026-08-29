@@ -79,10 +79,20 @@ def locate_turnstile_box(page: ChromiumTab, timeout: int = 5) -> Any:
         return None
     try:
         wrapper = cf_solution.parent()  # type: ignore[union-attr]
+        shadow = None
         try:
             shadow = wrapper.shadow_root  # type: ignore[union-attr]
         except Exception:
             shadow = None
+        if not shadow:
+            # 新版结构：shadow host 是 wrapper 内的 div（input 的兄弟节点），
+            # 例如 .cf-turnstile > div > [div(host), input]
+            try:
+                host = wrapper.ele("tag:div", timeout=min(timeout, 2))  # type: ignore[union-attr]
+                if host:
+                    shadow = host.shadow_root  # type: ignore[union-attr]
+            except Exception:
+                shadow = None
         if not shadow:
             logger.debug("locate_turnstile_box: 输入框父级无 shadow root")
             return None

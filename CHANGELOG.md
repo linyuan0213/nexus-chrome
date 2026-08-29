@@ -2,6 +2,12 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.2.6] - 2026-08-29
+
+### 修复
+
+- **内嵌 Turnstile 复选框定位兼容新版结构**：新版 Turnstile 的 shadow host 是 `cf-turnstile-response` 输入框的兄弟 div（`wrapper > [div(host), input]`），旧逻辑取输入框父级 shadow root 返回 None，导致签到页复选框找不到、从不点击、Turnstile 一直卡在"人机验证"。现在回退到兄弟 div 的 shadow root，`locate_turnstile_box` 能正确定位并点击复选框
+
 ## [v3.2.5] - 2026-08-12
 
 ### 修复
