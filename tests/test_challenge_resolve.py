@@ -84,9 +84,10 @@ class TestCloudflareResolve:
         tab = MagicMock()
         tab.html = CF_PAGE
         resolver = CloudflareResolver()
-        # 由于 _solve_standard 会调用 sync_cf_retry，mock 它
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("src.challenge.cloudflare._is_managed_challenge", lambda x: True)
+            # 无可定位的 Turnstile 组件 → 走托管等待
+            mp.setattr("src.challenge.cloudflare.locate_turnstile_box", lambda t, timeout=5: None)
             result = resolver.resolve(tab, timeout=1)
         # Managed Challenge 会轮询，超时返回 False
         assert result is False
@@ -154,16 +155,16 @@ class TestSolveEmbeddedWidget:
 
 
 class TestCloudflareResolveOrder:
-    def test_managed_challenge_preferred_over_box(self):
-        """拦截页同时是托管挑战与盒子挑战时，优先走托管等待。
+    def test_managed_challenge_when_no_locatable_box(self):
+        """托管标记存在但无可定位的 Turnstile 组件时，走托管等待。
 
         托管拦截页（Managed Challenge）虽常内嵌 cf-turnstile-response，
-        但没有可点击的复选框，点击会超时；应等待 JS 自动求解。
+        但没有可点击的复选框（locate_turnstile_box 返回 None），应等待 JS 自动求解。
         """
         from src.challenge.cloudflare import CloudflareResolver
 
         tab = MagicMock()
-        # 同时含 _cf_chl_opt（拦截页）、cf-turnstile-response（盒子）、challenges.cloudflare.com（托管）
+        # 同时含 _cf_chl_opt（拦截页）、cf-turnstile-response（盒子标记）、challenges.cloudflare.com（托管）
         tab.html = (
             "<html><head><title>请稍候…</title></head><body>"
             "<script src='https://challenges.cloudflare.com/turnstile/v0/api.js'></script>"
@@ -172,7 +173,9 @@ class TestCloudflareResolveOrder:
         )
         resolver = CloudflareResolver()
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(CloudflareResolver, "_solve_box", lambda self, t, timeout: True)
+            # 组件未渲染出可交互 iframe → 定位失败
+            mp.setattr("src.challenge.cloudflare.locate_turnstile_box", lambda t, timeout=5: None)
+            mp.setattr(CloudflareResolver, "_solve_box", lambda self, t, timeout, located=None: True)
             called = []
             mp.setattr(
                 CloudflareResolver,
@@ -180,7 +183,7 @@ class TestCloudflareResolveOrder:
                 lambda self, t, timeout: called.append(True) or True,
             )
             assert resolver.resolve(tab, timeout=3) is True
-        assert called == [True], "托管挑战存在时应先走托管等待，而非点击盒子"
+        assert called == [True], "无可定位盒子时应走托管等待"
 
     def test_box_challenge_when_not_managed(self):
         """非托管拦截页上的 Turnstile 盒子挑战仍应点击盒子。"""
@@ -191,7 +194,7 @@ class TestCloudflareResolveOrder:
         tab.html = "<html><head><title>请稍候…</title></head><body><input name='cf-turnstile-response'></body></html>"
         resolver = CloudflareResolver()
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(CloudflareResolver, "_solve_box", lambda self, t, timeout: True)
+            mp.setattr(CloudflareResolver, "_solve_box", lambda self, t, timeout, located=None: True)
             called = []
             mp.setattr(
                 CloudflareResolver,
@@ -237,3 +240,39 @@ class TestCloudflareResolveOrder:
         assert result["detected"] is True
         assert result["solved"] is True
         assert result["layers"] == ["cloudflare", "leichi"]
+
+
+class TestEmbeddedWidgetClick:
+    """内嵌 Turnstile 真实点击路径：组件存在 → 点击 → 等待 token。"""
+
+    def test_widget_click_then_token(self):
+        from src.challenge.cloudflare import CloudflareResolver
+        from src.utils.challenge_utils import TurnstileBox
+
+        tab = MagicMock()
+        # 业务页（非拦截页标题）上内嵌 Turnstile，组件存在且可定位
+        tab.title = "签到"
+
+        class _FakeResolver(CloudflareResolver):
+            def _widget_present(self, tab):  # noqa: ARG002
+                return True
+
+        state = {"tokens": ["", "", "token-ok"]}
+
+        def fake_token(t):
+            return state["tokens"].pop(0)
+
+        def fake_click(page, box):
+            assert isinstance(box, TurnstileBox)
+            assert box.box is not None
+            return True
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.challenge.cloudflare.turnstile_token", fake_token)
+            mp.setattr("src.challenge.cloudflare.turnstile_click", fake_click)
+            mp.setattr(
+                "src.challenge.cloudflare.locate_turnstile_box",
+                lambda t, timeout=5: TurnstileBox(box=MagicMock(), origin=(0, 0)),
+            )
+            result = _FakeResolver().solve_embedded_widget(tab, timeout=5)
+        assert result is True

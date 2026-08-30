@@ -65,9 +65,16 @@ class Session(TabMixin):
             self._apply_ua_metadata(tab)  # type: ignore[union-attr]
             if self._user_agent:
                 tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
-            if cookie:
-                cookies = self._parse_cookie_header(cookie)
-                domain = urlparse(url).netloc
+            # Cookie：显式传入优先；未传时自动携带会话内已存储的同域名 Cookie
+            domain = urlparse(url).netloc
+            cookies = self._parse_cookie_header(cookie) if cookie else []
+            if not cookie:
+                stored = self.cookie_store.get(domain)
+                for c in stored:
+                    c.setdefault("domain", domain)
+                    c.setdefault("path", "/")
+                cookies = stored
+            if cookies:
                 for c in cookies:
                     c.setdefault("domain", domain)
                     c.setdefault("path", "/")

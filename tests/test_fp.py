@@ -1,11 +1,14 @@
 """测试指纹画像模型、环境变量渲染与本地画像读取。"""
 
 import json
+import os
 
 from src.fp.profile import FpProfile, RolloutRule
 from src.fp.render import render_env
 from src.fp.store import store
 from src.fp.sync_client import get_profile, get_profile_local, invalidate_cache
+
+REPO_FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "deploy", "fonts")
 
 DEFAULT_PROFILE_JSON = json.dumps(
     {
@@ -140,6 +143,64 @@ class TestRenderEnv:
         env = render_env(profile.fingerprint)
         assert env["FP_WEBGL_PARAMS"] == "36183:4"
         assert "34921" not in env["FP_WEBGL_PARAMS"]
+
+    def test_font_block_auto_per_platform(self):
+        """Mac 画像自动屏蔽 Windows 字体（Calibri/SimHei/PMingLiU），保留 Mac 原生字体。"""
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.platform = "MacIntel"
+        env = render_env(profile.fingerprint)
+        block = env["FP_FONT_BLOCK"].split(",")
+        assert "Calibri" in block
+        assert "SimHei" in block
+        assert "PMingLiU" in block
+        assert "Arial" not in block
+
+    def test_font_block_merge_with_explicit(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.font_block = ["MyCustomFont"]
+        env = render_env(profile.fingerprint)
+        block = env["FP_FONT_BLOCK"].split(",")
+        assert block[0] == "MyCustomFont"
+        assert "Arial" in block
+
+    def test_fontconfig_file_selected_by_platform(self, monkeypatch):
+        monkeypatch.setattr("src.fp.platform_fonts.FONT_PROFILE_DIR", REPO_FONTS_DIR)
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.platform = "MacIntel"
+        env = render_env(profile.fingerprint)
+        assert env["FONTCONFIG_FILE"].endswith("fonts-macos.conf")
+
+    def test_battery_defaults_stable_per_profile(self):
+        """未显式指定电池时按 profile_id 派生稳定值，电量在 0.35~0.95 区间。"""
+        fp = FpProfile(**json.loads(DEFAULT_PROFILE_JSON)).fingerprint
+        env = render_env(fp, profile_id="p1")
+        env2 = render_env(fp, profile_id="p1")
+        assert env["FP_BATTERY_LEVEL"] == env2["FP_BATTERY_LEVEL"]
+        assert env["FP_BATTERY_CHARGING"] == env2["FP_BATTERY_CHARGING"]
+        level = float(env["FP_BATTERY_LEVEL"])
+        assert 0.35 <= level <= 0.95
+        assert env["FP_BATTERY_CHARGING"] in ("0", "1")
+
+    def test_battery_explicit_values(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.battery_level = 0.62
+        profile.fingerprint.battery_charging = False
+        env = render_env(profile.fingerprint, profile_id="p1")
+        assert env["FP_BATTERY_LEVEL"] == "0.62"
+        assert env["FP_BATTERY_CHARGING"] == "0"
+
+    def test_battery_charging_alone_is_honored(self):
+        """仅设置 battery_charging 时不得被 seed 派生值覆盖。"""
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.battery_charging = True
+        env = render_env(profile.fingerprint, profile_id="c")
+        assert env["FP_BATTERY_CHARGING"] == "1"
+
+    def test_timezone_rendered_as_tz(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.timezone = "Asia/Tokyo"
+        env = render_env(profile.fingerprint)
+        assert env["TZ"] == "Asia/Tokyo"
 
 
 class TestProfileStore:

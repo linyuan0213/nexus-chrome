@@ -75,18 +75,31 @@ nexus-chrome/
 - `GET /` - API 信息
 - `GET /status` - 服务状态
 - `GET /instances` - 列出浏览器实例
+- `POST /instances/{key}/restart` - 手动拉起已停止的实例
 - `DELETE /instances/{key}` - 手动关闭实例
-- `WS /ws/events?types=...` - 事件推送（session_created / session_deleted）
+- `WS /ws/events?types=...` - 事件推送（session_created / session_deleted；认证开启时 query 带 `Authorization=Bearer <token>`）
+
+### 认证（设置 `AUTH_PASSWORD` 后启用）
+- `POST /api/auth/login` - 登录（密码 → 24h 短期 session token）
+- `POST /api/auth/logout` - 登出
+- `GET /api/auth/config` - 认证是否开启（公开，前端探测用）
+- `GET /api/auth/me` - 认证状态 + VNC 密码等安全配置（需认证）
+- `GET/POST /api/auth/keys`、`DELETE /api/auth/keys/{id}` - API Key 管理（第三方程序凭证，`ncmk_` 前缀，scope 路径级限权，可吊销）
+
+### 管理后台（Web UI）
+- `GET /ui/` - Nexus Chrome Manager（会话/画像/实例/事件/调试台/API Keys 可视化管理；构建自 `frontend/`）
 
 ### Session 管理
 - `POST /sessions` - 创建会话（支持 `fp_profile_id` 绑定指纹画像）
 - `GET /sessions` - 列出会话（含可恢复会话）
 - `DELETE /sessions/{id}` - 删除会话
+- `DELETE /sessions/recovered` - 清空遗留会话记录（遗留记录超 7 天自动过期）
 
 ### 浏览器操作（基于 Session）
 - `POST /sessions/{id}/navigate` - 浏览器导航（自动过盾、提取 Cookie）
 - `GET /sessions/{id}/html` - 获取当前页面 HTML
 - `GET /sessions/{id}/cookies` - 获取已存储 Cookie
+- `DELETE /sessions/{id}/cookies?domain=&name=` - 删除单个 Cookie（镜像存储级）
 - `POST /sessions/{id}/click` - 点击元素（人性化轨迹）
 - `POST /sessions/{id}/drag` - 拖拽（滑块验证码）
 - `POST /sessions/{id}/input` - 输入文本
@@ -319,6 +332,7 @@ reCAPTCHA v3 评分验证：在 `recaptcha-demo.appspot.com/recaptcha-v3-request
 - `VK_ICD_FILENAMES`: SwiftShader Vulkan ICD 路径（vulkan 模式需指向 `/opt/patched-chrome/vk_swiftshader_icd.json`）
 - `REMOTE_CHROME_ADDRESS`: 远程 Chrome CDP 地址，如 `127.0.0.1:9222`
 - `VNC_PASSWORD`: VNC 密码（部署时必须修改，禁止默认值）
+- `AUTH_PASSWORD`: 管理后台访问密码。设置后启用登录页 + 全 API/WS 鉴权（人机分离：用户登录签发 24h 短期 token，第三方程序用 API Key）；**未设置则认证完全关闭（本地模式）**
 - `CHALLENGE_TIMEOUT`: 挑战等待超时（默认：60 秒）
 - `HTTP_CLIENT_TIMEOUT`: HTTP 客户端超时（默认：30 秒）
 - `MAX_BROWSERS`: 浏览器实例上限（默认：5）
@@ -326,7 +340,7 @@ reCAPTCHA v3 评分验证：在 `recaptcha-demo.appspot.com/recaptcha-v3-request
 - `DATA_DIR`: 会话持久化目录（默认：`./data`）
 - `USER_DATA_PATH`: Chrome 用户数据目录路径（默认：`~/.cache/nexus-chrome/user_data`）
 - `PROFILE_DATA_DIR`: 画像实例用户数据目录（默认：`~/.cache/nexus-chrome/profiles`）
-- `FP_ADMIN_TOKEN` / `FP_NODE_TOKEN`: 配置中心鉴权（设置后强制校验）
+- `FP_ADMIN_TOKEN` / `FP_NODE_TOKEN`: 配置中心鉴权（设置后强制校验；统一认证开启时 session token / scope=profiles 的 API Key 也可访问）
 - `CLEANUP_ENABLED`: 是否启用用户数据目录定期清理（默认：`true`）
 - `CLEANUP_INTERVAL`: 清理间隔，单位秒（默认：3600）
 - `CLEANUP_MAX_SIZE_GB`: 超过该大小触发深度清理，单位 GB（默认：2，0 表示禁用）

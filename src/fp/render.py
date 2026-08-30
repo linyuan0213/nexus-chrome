@@ -2,12 +2,19 @@
 
 patched Chromium 的 fp_config.h 在 Blink 渲染进程通过 getenv 读取这些环境变量
 （渲染进程继承浏览器进程环境）。列表字段用逗号连接。
+
+除 FP_* 外还产出浏览器进程级环境：TZ（时区）、FONTCONFIG_FILE（平台字体
+配置）、FP_BATTERY_LEVEL/FP_BATTERY_CHARGING（由 1025-battery-status.patch 在
+设备服务进程读取），保证画像的目标平台（macos/windows/linux）在字体、电池、
+时区上自洽。
 """
 
-from typing import Dict, List, Optional
+import hashlib
+from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from src.fp.platform_fonts import merge_font_block, platform_font_config
 from src.fp.profile import FingerprintFields
 
 # Profile 字段 → 环境变量名
@@ -44,12 +51,13 @@ ENV_MAP: Dict[str, str] = {
     "uad_platform_version": "FP_UAD_PLATFORM_VERSION",
     "uad_arch": "FP_UAD_ARCH",
     "uad_model": "FP_UAD_MODEL",
+    # 进程级环境（非 FP_*）：时区与出口 IP 地理位置保持一致
+    "timezone": "TZ",
 }
 
 # 列表字段 → 环境变量名（逗号连接）
 LIST_ENV_MAP: Dict[str, str] = {
     "languages": "FP_LANGS",
-    "font_block": "FP_FONT_BLOCK",
     "webgl_extensions_remove": "FP_WEBGL_EXTENSIONS_REMOVE",
 }
 
@@ -131,6 +139,26 @@ def _auto_viewport_dims(fingerprint: FingerprintFields) -> List[int]:
     return [32767, 32767] if _detect_platform(fingerprint) == "windows" else [16384, 16384]
 
 
+def _battery_values(
+    profile_id: Optional[str],
+    explicit_level: Optional[float],
+    explicit_charging: Optional[bool],
+) -> Tuple[float, bool]:
+    """确定画像的电池状态（level 0..1, charging）。
+
+    画像未显式指定时按 profile_id 派生稳定值：电量 0.35~0.95、约一半概率在充电，
+    避免所有实例"永远 100% + 永远充电中"的虚拟机特征。
+    """
+    if explicit_level is not None:
+        level = max(0.0, min(1.0, float(explicit_level)))
+        charging = bool(explicit_charging) if explicit_charging is not None else False
+        return level, charging
+    seed = int(hashlib.sha256((profile_id or "default").encode()).hexdigest()[:8], 16)
+    level = round(0.35 + (seed % 600) / 1000.0, 2)  # 0.35 ~ 0.95
+    charging = bool(explicit_charging) if explicit_charging is not None else (seed // 1000) % 2 == 0
+    return level, charging
+
+
 def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None) -> Dict[str, str]:
     """将指纹参数渲染为 FP_* 环境变量字典（不含空值）。
 
@@ -173,4 +201,15 @@ def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None)
         viewport_dims = _auto_viewport_dims(fingerprint)
     if len(viewport_dims) == 2:
         env["FP_WEBGL_VIEWPORT_DIMS"] = f"{viewport_dims[0]},{viewport_dims[1]}"
+    # 平台字体策略：黑名单（C++ 补丁隐藏）+ FONTCONFIG_FILE（fontconfig 别名/
+    # rejectfont 兜底）。画像显式指定的黑名单与平台策略合并。
+    platform = _detect_platform(fingerprint)
+    platform_block, fontconfig_file = platform_font_config(platform)
+    env["FP_FONT_BLOCK"] = ",".join(merge_font_block(fingerprint.font_block, platform_block))
+    if fontconfig_file:
+        env["FONTCONFIG_FILE"] = fontconfig_file
+    # 电池状态（1025-battery-status.patch 在设备服务进程读取，经 --fp-env-* 透传）
+    level, charging = _battery_values(profile_id, fingerprint.battery_level, fingerprint.battery_charging)
+    env["FP_BATTERY_LEVEL"] = f"{level:.2f}"
+    env["FP_BATTERY_CHARGING"] = "1" if charging else "0"
     return env

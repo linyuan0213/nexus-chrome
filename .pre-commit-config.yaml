@@ -14,3 +14,25 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+  # 前端工具链（frontend/ 目录）：oxlint + oxfmt + vue-tsc
+  - repo: local
+    hooks:
+      - id: oxlint
+        name: oxlint (frontend)
+        entry: pnpm --dir frontend exec oxlint .
+        language: system
+        files: ^frontend/
+        pass_filenames: false
+      - id: oxfmt
+        name: oxfmt --check (frontend)
+        entry: pnpm --dir frontend exec oxfmt --check .
+        language: system
+        files: ^frontend/
+        pass_filenames: false
+      - id: vue-tsc
+        name: vue-tsc typecheck (frontend)
+        entry: pnpm --dir frontend run typecheck
+        language: system
+        files: ^frontend/
+        pass_filenames: false

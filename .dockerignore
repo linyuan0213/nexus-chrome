@@ -19,3 +19,9 @@ __pycache__
 fp_patches/
 data/
 tmp/
+
+# 前端：node_modules/dist 不进镜像（dist 由 frontend-build 阶段产出后单独拷贝）
+frontend/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results

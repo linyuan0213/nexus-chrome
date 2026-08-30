@@ -12,6 +12,7 @@ from src.config.settings import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
+from src.fp.platform_fonts import platform_font_config
 
 
 def _detect_timezone() -> str:
@@ -39,7 +40,7 @@ def _detect_timezone() -> str:
 
 def base_fp_env() -> Dict[str, str]:
     """基础指纹环境变量（默认/兜底值，画像环境在此基础上覆盖）。"""
-    return {
+    env: Dict[str, str] = {
         "TZ": _detect_timezone(),
         "FP_UA": DEFAULT_UA,
         "FP_UA_FULL": DEFAULT_UA_FULL,
@@ -64,3 +65,9 @@ def base_fp_env() -> Dict[str, str]:
         "FP_SCREEN_HEIGHT": str(WINDOW_HEIGHT),
         "FP_SCREEN_COLOR_DEPTH": "24",
     }
+    # 默认实例（Linux 平台）：应用平台字体策略，隐藏容器内 Windows/Mac 字体
+    block, fontconfig_file = platform_font_config("linux")
+    env["FP_FONT_BLOCK"] = ",".join(block)
+    if fontconfig_file:
+        env["FONTCONFIG_FILE"] = fontconfig_file
+    return env
