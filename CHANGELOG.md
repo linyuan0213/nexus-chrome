@@ -2,6 +2,36 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.3.0] - 2026-08-30
+
+### 新增
+
+- **Nexus Chrome Manager 管理前端**（`/ui/`）：Vue 3 + Vite 的可视化管理台，包含概览、会话（导航过盾、截图缩放/下载、标签页、Cookie 管理、点击/拖拽/输入/JS 交互、noVNC 实时画面）、指纹画像（CRUD、版本历史、回滚、灰度发布）、实例监控、事件中心、请求调试台、API Keys 管理、设置页
+- **统一认证体系**（设置 `AUTH_PASSWORD` 启用）：登录页签发 24h 短期 session token；第三方程序用 API Key（`ncmk_` 前缀、SHA-256 存储、scope 路径级限权、可吊销）；全局中间件保护 API 与 WebSocket；未设置时保持本地模式不鉴权。新增端点：`POST /api/auth/login|logout`、`GET /api/auth/config|me`、`GET/POST/DELETE /api/auth/keys`
+- **实例手动拉起**：`POST /instances/{key}/restart` 主动拉起已停止实例（沿用创建时指纹环境）
+- **Cookie 删除**：`DELETE /sessions/{id}/cookies?domain=&name=`（镜像存储级）
+- **遗留会话清理**：`DELETE /sessions/recovered` 清空遗留记录
+- **平台字体配置**：画像字体/电池/时区环境自洽（`fp/render.py` + `platform_fonts.py`）
+- **ruff 内部导入规则**：`TID`（禁相对导入）+ `PLC0415`（禁函数级导入），测试目录豁免
+
+### 修复
+
+- **CF 盒子挑战永不点击**：含 `challenges.cloudflare.com` 脚本的拦截页被误判为托管挑战而干等。改为有可定位 Turnstile 组件（shadow root + iframe 就位）时优先点击复选框
+- **复选框坐标偏移**：iframe 内元素 rect 是 iframe 相对坐标，CDP 点击需叠加 iframe 在主页面视口的绝对偏移
+- **人性化点击**：复选框点击改贝塞尔轨迹（移动 + 按下/释放）+ ±3px 抖动，最多重试 3 次
+- **过盾耗时**：`page.html` 全量读取 6 次 → 1 次（标题快路径）；`tag:iframe` 定位（跨域约 10s）→ `css:iframe`（0.01s）；一次挑战只连接一次跨域帧
+- **Xvfb 残留 socket 误判**：容器重启后 `/tmp/.X11-unix/Xn` 残留 + slim 镜像无 pgrep 导致 Xvfb 不启动、Chrome 报 Missing X server。改用 unix socket 连接探测判断存活性
+- **websockify 泄漏**：部分死亡重启 / 实例对象替换时旧进程未清理，同端口多进程共享导致 noVNC 能看不能点。VncStack 按端口注册表 + 部分死亡先整体停止
+- **截图免导航**：无活跃标签页时自动创建 about:blank 标签页，不再报"没有活跃的标签页"
+- **导航自动携带 Cookie**：未显式传 cookie 时自动携带会话内已存储的同域名 Cookie
+- **遗留会话注册表膨胀**：记录带 `updated_at`，超 7 天自动过期裁剪
+- **nginx**：`/ui/` 静态资源 SPA 回退 + `mime.types`（修复 JS MIME text/plain）
+
+### 变更
+
+- `/status` 移除 VNC 敏感字段（迁至认证后的 `GET /api/auth/me`）
+- 遗留会话提示条新增"清除遗留记录"按钮
+
 ## [v3.2.6] - 2026-08-29
 
 ### 修复
