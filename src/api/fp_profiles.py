@@ -8,9 +8,10 @@
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from src.api.schemas import ApiResponse
+from src.core.auth import auth_service
 from src.fp.profile import FpProfile, RolloutRule
 from src.fp.signing import sign_payload
 from src.fp.store import store
@@ -22,19 +23,35 @@ _FP_ADMIN_TOKEN: Optional[str] = os.getenv("FP_ADMIN_TOKEN") or None
 _FP_NODE_TOKEN: Optional[str] = os.getenv("FP_NODE_TOKEN") or None
 
 
+def is_fp_credential(token: str) -> bool:
+    """是否为指纹配置中心的管理/节点凭证（供全局认证中间件放行兼容）。"""
+    return bool(token) and token in {t for t in (_FP_ADMIN_TOKEN, _FP_NODE_TOKEN) if t}
+
+
 def _check_token(authorization: Optional[str], required: Optional[str]) -> None:
+    # 统一认证开启时：session token / scope=profiles 的 API Key 均放行
+    if auth_service.enabled and authorization:
+        token = authorization.removeprefix("Bearer ").strip()
+        if auth_service.verify(token, "/api/profiles"):
+            return
     if not required:
         return  # 未配置 token 则开放
     if not authorization or authorization != f"Bearer {required}":
         raise HTTPException(status_code=401, detail="invalid token")
 
 
-def require_admin(authorization: Optional[str] = Query(default=None, alias="Authorization", include_in_schema=False)):
-    _check_token(authorization, _FP_ADMIN_TOKEN)
+def require_admin(
+    authorization: Optional[str] = Header(default=None),
+    auth_query: Optional[str] = Query(default=None, alias="Authorization", include_in_schema=False),
+):
+    _check_token(authorization or auth_query, _FP_ADMIN_TOKEN)
 
 
-def require_node(authorization: Optional[str] = Query(default=None, alias="Authorization", include_in_schema=False)):
-    _check_token(authorization, _FP_NODE_TOKEN)
+def require_node(
+    authorization: Optional[str] = Header(default=None),
+    auth_query: Optional[str] = Query(default=None, alias="Authorization", include_in_schema=False),
+):
+    _check_token(authorization or auth_query, _FP_NODE_TOKEN)
 
 
 @fp_router.get("/profiles", response_model=ApiResponse, dependencies=[Depends(require_admin)])

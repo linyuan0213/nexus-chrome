@@ -68,6 +68,14 @@ async def list_sessions():
     )
 
 
+@sessions_router.delete("/recovered", response_model=ApiResponse)
+async def clear_recovered_sessions():
+    """清空全部遗留（上次进程退出时未销毁）的会话记录。"""
+    sm = _get_sm()
+    n = sm.clear_recovered()
+    return ApiResponse(code=0, message=f"已清除 {n} 条遗留记录", data=None)
+
+
 @sessions_router.delete("/{session_id}", response_model=ApiResponse)
 async def delete_session(session_id: str):
     try:
@@ -116,6 +124,18 @@ async def get_cookies(session_id: str, domain: str = Query(None)):
         session = sm.get(session_id)
         result = session.get_cookies(domain)
         return ApiResponse(code=0, message="ok", data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@sessions_router.delete("/{session_id}/cookies", response_model=ApiResponse)
+async def delete_cookie(session_id: str, domain: str = Query(...), name: str = Query(...)):
+    """删除单个 Cookie（镜像存储级）。"""
+    try:
+        sm = _get_sm()
+        session = sm.get(session_id)
+        removed = session.delete_cookie(domain, name)
+        return ApiResponse(code=0, message="已删除" if removed else "Cookie 不存在", data=None)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

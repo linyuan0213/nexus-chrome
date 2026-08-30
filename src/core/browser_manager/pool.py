@@ -34,6 +34,11 @@ class BrowserPool:
         self._idle_ttl = float(os.getenv("INSTANCE_IDLE_TTL", "600"))  # 空闲实例回收 TTL（秒）
 
     # ---- 引用计数 ----
+    def get_existing(self, key: str) -> Optional["ChromeInstance"]:
+        """按 key 获取已存在实例（不创建）；不存在返回 None。"""
+        with self._lock:
+            return self._instances.get(key)
+
     def retain(self, key: str) -> None:
         """会话创建时关联实例（引用 +1）。"""
         inst = self._instances.get(key)

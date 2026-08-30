@@ -40,9 +40,11 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
+    "E",  # pycodestyle errors（含 E402：模块级导入必须在顶部）
     "F",  # Pyflakes
     "I",  # isort
+    "TID",  # flake8-tidy-imports（内部导入依赖规则）
+    "PLC0415",  # 禁止函数级导入（导入一律写在文件顶部，防隐藏依赖）
     "S110",  # try-except-pass (do not silently swallow exceptions)
 ]
 ignore = [
@@ -54,8 +56,20 @@ ignore = [
     "S608",  # hardcoded-sql-expression
 ]
 
+[tool.ruff.lint.flake8-tidy-imports]
+# 禁止相对导入（强制绝对导入，保持内部依赖方向清晰可读）
+ban-relative-imports = "all"
+# 禁止跨层反向依赖：core/fp 不得依赖 api/services；services 不得反向依赖 api
+banned-module-level-imports = []
+
+[tool.ruff.lint.isort]
+# src 视为一方包：内部导入单独分组并排在标准库/第三方之后
+known-first-party = ["src"]
+
 [tool.ruff.lint.per-file-ignores]
 "src/config/settings.py" = ["E501"]
+# 测试豁免：允许函数级导入/宽松依赖方向，测试可自由引用被测模块
+"tests/**" = ["TID", "PLC0415"]
 "tests/test_challenge.py" = ["E501"]
 "tests/test_challenge_resolve.py" = ["E501"]
 

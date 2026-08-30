@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+from src.config.settings import DATA_DIR
 from src.core.browser_manager import BrowserPool, browser_manager
 from src.core.session import SessionManager
 from src.fp.service import resolve_profile_env
@@ -20,14 +21,10 @@ session_manager: Optional[SessionManager] = None
 def get_session_manager(pool: Optional[BrowserPool] = None) -> SessionManager:
     global session_manager
     if session_manager is None:
-        persist_file = None
-        try:
-            from src.config.settings import DATA_DIR
-
-            persist_file = os.path.join(DATA_DIR, "sessions.json")
-        except Exception:  # noqa: BLE001
-            persist_file = os.path.join(os.getcwd(), "data", "sessions.json")
-        session_manager = SessionManager(pool or browser_manager, persist_file=persist_file)
+        session_manager = SessionManager(
+            pool or browser_manager,
+            persist_file=os.path.join(DATA_DIR, "sessions.json"),
+        )
     return session_manager
 
 

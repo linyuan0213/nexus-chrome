@@ -172,11 +172,13 @@ class ChromeInstance:
         sw, sh = self.screen_size
         env["FP_SCREEN_WIDTH"] = str(sw)
         env["FP_SCREEN_HEIGHT"] = str(sh)
-        # 清理残留的 Chrome 配置锁（崩溃/强杀后 SingletonLock 残留会导致拒绝启动）
+        # 清理残留的 Chrome 配置锁（崩溃/强杀后 SingletonLock 残留会导致拒绝启动）。
+        # SingletonLock/SingletonSocket 是符号链接且指向旧容器的失效路径，
+        # os.path.exists 对坏链接返回 False，必须用 lexists 才能删掉。
         try:
             for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
                 lock_path = os.path.join(self.user_data_dir, lock_name)
-                if os.path.exists(lock_path):
+                if os.path.lexists(lock_path):
                     os.remove(lock_path)
         except Exception:
             logger.debug(f"[fp:{self.key}] 清理 Chrome 配置锁失败，继续")
@@ -190,7 +192,15 @@ class ChromeInstance:
         # 只传无空格的 WebGL 参数开关（UA/renderer 等含空格的值走 CDP/其他通道，
         # 否则空格会被子进程命令行解析拆开导致崩溃）。
         # 开关名必须全小写（Chromium IsSwitchNameValid: ToLowerASCII==self）。
-        for key in ("FP_WEBGL_PARAMS", "FP_WEBGL_VIEWPORT_DIMS", "FP_WEBGL_EXTENSIONS_REMOVE"):
+        # FP_BATTERY_* 数值型无空格，也走开关：设备服务子进程的 env 可能被过滤，
+        # 开关会原样透传（1025-battery-status.patch 在设备服务读取）。
+        for key in (
+            "FP_WEBGL_PARAMS",
+            "FP_WEBGL_VIEWPORT_DIMS",
+            "FP_WEBGL_EXTENSIONS_REMOVE",
+            "FP_BATTERY_LEVEL",
+            "FP_BATTERY_CHARGING",
+        ):
             value = self.fp_env.get(key)
             if value:
                 args.append(f"--fp-env-{key.lower()}={value}")

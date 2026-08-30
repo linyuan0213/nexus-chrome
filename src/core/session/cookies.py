@@ -77,3 +77,8 @@ class CookieMixin(SessionBase):
         if domain:
             return {domain: self.cookie_store.as_dict(domain)}
         return self.cookie_store.as_full_dict()
+
+    def delete_cookie(self, domain: str, name: str) -> bool:
+        """删除单个 Cookie（镜像存储级，供管理端操作）。"""
+        self.touch()
+        return self.cookie_store.delete_cookie(domain, name)

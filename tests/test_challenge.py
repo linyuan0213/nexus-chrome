@@ -1,5 +1,7 @@
 """挑战检测单元测试 — 纯 HTML 解析，不需要浏览器。"""
 
+from unittest.mock import MagicMock, patch
+
 from src.config.settings import (
     CHALLENGE_TYPE_CLOUDFLARE,
     CHALLENGE_TYPE_FIVE_SECOND,
@@ -161,3 +163,66 @@ class TestChallengeOrchestratorInit:
         tab.html = NORMAL_PAGE
         result = orchestrator.resolve(tab)
         assert "embedded_turnstile" in result
+
+
+class TestCloudflareResolveBranch:
+    """resolve 分支选择：盒子优先于托管（防脚本标记误判导致复选框不点击）。"""
+
+    def _resolver(self):
+        from src.challenge.cloudflare import CloudflareResolver
+
+        return CloudflareResolver()
+
+    def _tab(self, html: str):
+        tab = MagicMock()
+        tab.html = html
+        return tab
+
+    _BOX_HTML = (
+        "<html><head><title>Just a moment...</title></head><body>"
+        '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
+        '<input name="cf-turnstile-response">'
+        "</body></html>"
+    )
+
+    def test_box_locatable_goes_to_solve_box_even_with_managed_script(self):
+        """同时带 managed 脚本标记 + 可定位盒子 → 走 _solve_box（点击复选框）。"""
+        resolver = self._resolver()
+        with (
+            patch("src.challenge.cloudflare.locate_turnstile_box", return_value=MagicMock()),
+            patch.object(resolver, "_solve_box", return_value=True) as box,
+            patch.object(resolver, "_wait_managed", return_value=True) as managed,
+        ):
+            assert resolver.resolve(self._tab(self._BOX_HTML)) is True
+        box.assert_called_once()
+        managed.assert_not_called()
+
+    def test_managed_without_box_waits(self):
+        """托管标记且无 Turnstile 输入/盒子 → 走 _wait_managed（不点击）。"""
+        resolver = self._resolver()
+        managed_html = (
+            "<html><head><title>Just a moment...</title></head><body>"
+            '<script src="https://challenges.cloudflare.com/managed/v1/challenge.js"></script>'
+            "</body></html>"
+        )
+        with (
+            patch("src.challenge.cloudflare.locate_turnstile_box", return_value=None),
+            patch.object(resolver, "_solve_box", return_value=True) as box,
+            patch.object(resolver, "_wait_managed", return_value=True) as managed,
+        ):
+            assert resolver.resolve(self._tab(managed_html)) is True
+        box.assert_not_called()
+        managed.assert_called_once()
+
+    def test_non_interstitial_passes_through(self):
+        """普通页面（内嵌 Turnstile 组件）不算挑战，直接放行。"""
+        resolver = self._resolver()
+        html = (
+            "<html><head><title>签到</title></head><body>"
+            '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
+            "</body></html>"
+        )
+        with patch.object(resolver, "_solve_box") as box, patch.object(resolver, "_wait_managed") as managed:
+            assert resolver.resolve(self._tab(html)) is True
+        box.assert_not_called()
+        managed.assert_not_called()

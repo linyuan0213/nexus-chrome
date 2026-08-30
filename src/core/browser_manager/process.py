@@ -113,13 +113,40 @@ def wait_for_port(port: int, timeout: int = 10) -> bool:
 
 def _wait_for_xvfb_socket(display: str, timeout: int = 10) -> bool:
     """等待 Xvfb 的 Unix socket 就绪。"""
-    socket_path = f"/tmp/.X11-unix/X{int(display.lstrip(':'))}"
+    socket_path = f"/tmp/.X11-unix/X{display_num(display)}"
     deadline = _time.monotonic() + timeout
     while _time.monotonic() < deadline:
         if os.path.exists(socket_path):
             return True
         _time.sleep(0.5)
     return False
+
+
+def display_num(display: str) -> int:
+    """':1' → 1"""
+    return int(display.lstrip(":"))
+
+
+def _unix_socket_alive(path: str) -> bool:
+    """unix socket 是否有进程监听（残留文件连接会被拒绝）。"""
+    if not os.path.exists(path):
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            s.connect(path)
+        return True
+    except OSError:
+        return False
+
+
+def _xvfb_socket_alive(display: str) -> bool:
+    """通过实际连接 X11 socket 判断 Xvfb 是否存活。
+
+    容器重启后 /tmp/.X11-unix/Xn 可能残留（文件系统保留但进程已死），
+    仅用 os.path.exists 会误判。残留 socket 连接会被拒绝（ECONNREFUSED）。
+    """
+    return _unix_socket_alive(f"/tmp/.X11-unix/X{display_num(display)}")
 
 
 def start_xvfb(display: str, screen_size: Optional[tuple[int, int]] = None) -> Optional[subprocess.Popen[bytes]]:
@@ -135,13 +162,15 @@ def start_xvfb(display: str, screen_size: Optional[tuple[int, int]] = None) -> O
         result = subprocess.run(["pgrep", "-f", f"Xvfb {display}"], capture_output=True)
         alive = result.returncode == 0
     except Exception:
-        alive = os.path.exists(f"/tmp/.X11-unix/X{int(display.lstrip(':'))}")
+        # slim 镜像无 procps（pgrep 不存在）：回退到 socket 连接探测，
+        # 残留 socket 文件连接会被拒绝，不会误判
+        alive = _xvfb_socket_alive(display)
     if alive:
         return None
     # 清除残留 socket / lock 后启动
     for stale in (
-        f"/tmp/.X11-unix/X{int(display.lstrip(':'))}",
-        f"/tmp/.X{int(display.lstrip(':'))}-lock",
+        f"/tmp/.X11-unix/X{display_num(display)}",
+        f"/tmp/.X{display_num(display)}-lock",
     ):
         try:
             if os.path.exists(stale):
