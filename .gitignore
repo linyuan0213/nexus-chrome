@@ -174,3 +174,13 @@ data/
 # 本地构建产物与内部工具
 fp_patches/
 tmp/
+
+# 本地 Chrome 发布包缓存（构建机 scp 产物，勿提交）
+chrome-cache/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright-mcp/
