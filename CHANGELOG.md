@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.3.2] - 2026-08-30
+
+### 修复
+
+- **API Key 复制按钮在非安全上下文（http://IP）失效**：`navigator.clipboard` 仅安全上下文可用，`execCommand` 兜底改为离屏 textarea + `setSelectionRange` + 选区恢复，兼容局域网 IP 访问
+- **nginx /ui/ 缓存策略**：`index.html` 不缓存、带哈希的 assets 长缓存 immutable，避免发布后浏览器加载旧版前端（截图缩放/下载等新功能不生效）
+
 ## [v3.3.1] - 2026-08-30
 
 ### 修复
