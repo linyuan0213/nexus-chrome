@@ -2,6 +2,12 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.3.1] - 2026-08-30
+
+### 修复
+
+- **构建失败**：`chrome-cache/` 被 .gitignore 整体忽略，CI/新克隆构建时 `COPY chrome-cache/` 计算 cache key 报 `"/chrome-cache": not found`。改为忽略目录内容、保留 `.gitkeep` 占位，本地包不存在时自动回退 GitHub Releases 下载
+
 ## [v3.3.0] - 2026-08-30
 
 ### 新增
