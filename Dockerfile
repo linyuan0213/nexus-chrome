@@ -1,3 +1,11 @@
+# ---------- 前端构建阶段：产出 /ui/ 静态资源 ----------
+FROM node:22-alpine AS frontend-build
+WORKDIR /build
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml /build/
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY frontend/ /build/
+RUN pnpm build
+
 FROM python:3.11-slim
 
 # Chrome 发布版本号（对应 GitHub Releases tag: chrome-<CHROME_VERSION>）
@@ -59,10 +67,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# nginx 统一入口（9850）：/chromeN/ 路由到各实例 websockify，/ 代理 FastAPI（内部 9851）
+# nginx 统一入口（9850）：/chromeN/ 路由到各实例 websockify，/ui/ 管理前端，/ 代理 FastAPI（内部 9851）
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
+# 管理前端静态资源（/ui/）
+COPY --from=frontend-build /build/dist /app/frontend/dist
 
-# 下载 Chrome 发布包（GitHub Releases）+ SHA256 校验 + 解包到 /opt/patched-chrome
+# 下载 Chrome 发布包（GitHub Releases）+ SHA256 校验 + 解包到 /opt/patched-chrome。
+# 构建上下文存在 chrome-cache/chrome-<ver>-<arch>.tar.gz 时优先用本地包
+#（GitHub 直连不稳；构建机 scp 产物放入 chrome-cache/ 即可，sha256 校验保证完整性）。
+COPY chrome-cache/ /tmp/chrome-cache/
 RUN set -eux; \
     case "${TARGETARCH}" in \
       amd64) arch="x64" ;; \
@@ -72,8 +85,13 @@ RUN set -eux; \
     mkdir -p /opt/patched-chrome; \
     base="https://github.com/linyuan0213/nexus-chrome-bin/releases/download/chrome-${CHROME_VERSION}"; \
     pkg="chrome-${CHROME_VERSION}-${arch}.tar.gz"; \
-    curl -fsSL -o "/tmp/${pkg}" "${base}/${pkg}"; \
-    curl -fsSL -o /tmp/chrome.sha256 "${base}/${pkg}.sha256"; \
+    if [ -f "/tmp/chrome-cache/${pkg}" ] && [ -f "/tmp/chrome-cache/${pkg}.sha256" ]; then \
+      cp "/tmp/chrome-cache/${pkg}" "/tmp/${pkg}"; \
+      cp "/tmp/chrome-cache/${pkg}.sha256" /tmp/chrome.sha256; \
+    else \
+      curl -fsSL -o "/tmp/${pkg}" "${base}/${pkg}"; \
+      curl -fsSL -o /tmp/chrome.sha256 "${base}/${pkg}.sha256"; \
+    fi; \
     (cd /tmp && sha256sum -c chrome.sha256); \
     tar -xzf "/tmp/${pkg}" -C /opt/patched-chrome; \
     chmod +x /opt/patched-chrome/chrome /opt/patched-chrome/chrome_crashpad_handler; \
@@ -97,9 +115,12 @@ RUN set -eux; \
     fc-cache -f; \
     rm -rf /var/lib/apt/lists/*
 
-# Office 字体度量兼容别名：Calibri→Carlito、Cambria→Caladea（canvas 字体指纹与真实
-# Office 字体度量一致；Segoe UI 无兼容开源字体，保留默认回退）
-COPY scripts/fontconfig-ms-office-aliases.conf /etc/fonts/conf.d/60-ms-office-aliases.conf
+# 平台字体策略（macos/windows/linux 各自独立配置）：由 render_env 按画像平台
+# 通过 FONTCONFIG_FILE 选择——alias 使目标平台原生字体探测为"存在"（Calibri→
+# Carlito、SimHei→WenQuanYi 等），rejectfont 隐藏容器内不属于目标平台的字体
+# （如 Mac 画像下的 Calibri/SimHei）。该文件完全接管 fontconfig，替代全局
+# conf.d 指标别名，因此不再安装 60-ms-office-aliases.conf。
+COPY deploy/fonts /etc/fonts/profiles/
 
 # noVNC 静态资源（每个实例的 websockify 都会 --web 指向这里，供浏览器直接访问）
 RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC && \

@@ -1,0 +1,47 @@
+# Nexus Chrome Service — 无头浏览器服务（供 Nexus Media 的站点浏览器/Agent 工具调用）
+#
+# 使用:
+#   docker compose up -d --build
+# 然后在 Nexus Media 系统设置 → 实验室 配置:
+#   chrome_enabled: true
+#   chrome_server_host: http://<本机IP>:9850
+# 首次使用请在浏览器自动化页面登录站点并同步指纹，之后 Agent 的 browser_fetch/browser_screenshot
+# 即可携带站点 Cookie 访问登录后页面。
+
+services:
+  nexus-chrome:
+    build:
+      context: .
+      args:
+        # 对应 nexus-chrome-bin 的 GitHub Release tag: chrome-<版本>
+        CHROME_VERSION: "153.0.7991.0"
+    image: linyuan0213/nexus-chrome:latest
+    container_name: nexus-chrome
+    restart: unless-stopped
+    ports:
+      - "9850:9850" # API（nginx 反代）
+      # VNC 调试（可选，按需暴露）
+      # - "5900-5910:5900-5910" # x11vnc
+      # - "6080-6100:6080-6100" # websockify 网页 VNC
+    environment:
+      - TZ=Asia/Shanghai
+      - APP_HOST=0.0.0.0
+      - APP_PORT=9850
+      # 容器无 GPU：显式用 SwANGLE（SwiftShader 软件 Vulkan）初始化 WebGL。
+      # auto 模式不加 GPU 标志，Vulkan 无驱动 + SwiftShader 被黑名单拦截导致
+      # canvas.getContext('webgl') 返回 null（真实浏览器必有 WebGL，缺失即异常）。
+      # --enable-unsafe-swiftshader 绕过 WebGL 软件渲染黑名单。
+      - CHROME_RENDER_MODE=vulkan
+      # VNC 密码（安全要求：必须为强密码，请自行修改）
+      - VNC_PASSWORD=99fab73792ebab177f05cafa
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - DATA_DIR=/app/data
+      - PROFILE_DATA_DIR=/app/data/profiles
+      - USER_DATA_PATH=/app/data/user_data
+    volumes:
+      - ./data:/app/data
+      # 浏览器渲染需要大共享内存，否则多标签页易崩溃
+      - /dev/shm:/dev/shm
+    shm_size: "2gb"
+    security_opt:
+      - seccomp:unconfined

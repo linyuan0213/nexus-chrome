@@ -1,0 +1,46 @@
+{
+  "name": "nexus-chrome-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@iconify/vue": "^4.3.0",
+    "@vueuse/core": "^12.5.0",
+    "dayjs": "^1.11.13",
+    "naive-ui": "^2.40.3",
+    "ofetch": "^1.4.1",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^26.4.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
+    "happy-dom": "^16.5.3",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "~5.7.3",
+    "vite": "^6.0.11",
+    "vitest": "^3.0.4",
+    "vue-tsc": "^2.2.0"
+  },
+  "packageManager": "pnpm@11.8.0"
+}
