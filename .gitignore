@@ -176,7 +176,7 @@ fp_patches/
 tmp/
 
 # 本地 Chrome 发布包缓存（构建机 scp 产物，勿提交）
-chrome-cache/
+chrome-cache/*
 
 # 前端
 frontend/node_modules/
@@ -184,3 +184,6 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 frontend/.playwright-mcp/
+
+# chrome-cache 目录占位（本地包可选，构建回退 GitHub 下载）
+!chrome-cache/.gitkeep
