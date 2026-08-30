@@ -2,14 +2,17 @@
 
 import asyncio
 import datetime
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse, Response
 from loguru import logger
 
-from src.api.fp_profiles import fp_router
+from src.api.auth import auth_router
+from src.api.fp_profiles import fp_router, is_fp_credential
 from src.api.routes import sessions_router
 from src.config.settings import (
     APP_HOST,
@@ -22,7 +25,9 @@ from src.config.settings import (
     SESSION_CLEANUP_INTERVAL,
     USER_DATA_PATH,
 )
+from src.core.auth import auth_service
 from src.core.browser_manager import browser_manager
+from src.core.session import subscribe_events, unsubscribe_events
 from src.services.session_service import get_session_manager
 from src.utils.cleanup import cleanup_user_data_dir, get_directory_size
 
@@ -111,6 +116,49 @@ app = FastAPI(
 
 app.include_router(sessions_router)
 app.include_router(fp_router)
+app.include_router(auth_router)
+
+
+# ---- 认证中间件 ----
+# AUTH_PASSWORD 设置时启用：除白名单外的 API/WS 全部要求有效凭证
+# （session token 或 scope 匹配的 API Key）。
+AUTH_EXEMPT_PREFIXES = (
+    "/ui",  # 管理前端静态资源（登录页自身要能打开）
+    "/api/auth/config",  # 前端探测是否需要登录
+    "/api/auth/login",
+    "/chrome",  # noVNC iframe（VNC 密码在 URL 参数中，由 x11vnc 校验）
+    "/docs",
+    "/openapi.json",
+)
+AUTH_EXEMPT_EXACT = ("/", "/status")  # 健康检查
+
+
+def _auth_exempt(path: str) -> bool:
+    if path in AUTH_EXEMPT_EXACT:
+        return True
+    return any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES)
+
+
+@app.middleware("http")
+async def auth_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    if not auth_service.enabled or _auth_exempt(request.url.path):
+        return await call_next(request)
+    # Header 优先；WebSocket 等无法带头的场景走 query 参数
+    token = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    if not token:
+        token = request.query_params.get("Authorization", "").removeprefix("Bearer ").strip()
+    # 画像配置中心的管理/节点凭证（FP_ADMIN_TOKEN/FP_NODE_TOKEN）对 /api/profiles 放行
+    if request.url.path.startswith("/api/profiles") and is_fp_credential(token):
+        return await call_next(request)
+    if not token or not auth_service.verify(token, request.url.path):
+        return JSONResponse(status_code=401, content={"detail": "未认证或凭证无效"})
+    return await call_next(request)
 
 
 @app.get("/")
@@ -143,6 +191,7 @@ async def status():
         "version": APP_VERSION,
         "browser": "ready" if browser_manager.is_alive else "not_initialized",
         "instances": browser_manager.list_instances(),
+        # VNC 密码等敏感配置已移至 /api/auth/me（仅认证后可见）
         "timestamp": datetime.datetime.now().isoformat(),
     }
 
@@ -165,14 +214,34 @@ async def close_instance(key: str):
         return {"code": 1, "message": str(e)}
 
 
+@app.post("/instances/{key}/restart")
+async def restart_instance(key: str):
+    """手动拉起已停止的实例（沿用创建时的指纹环境；默认惰性启动，此接口用于管理端主动启动）。"""
+    inst = browser_manager.get_existing(key)
+    if inst is None:
+        return {"code": 1, "message": f"实例 {key} 不存在（创建会话时按需启动）"}
+    try:
+        await asyncio.to_thread(inst.ensure)
+        return {"code": 0, "message": f"实例 {key} 已启动"}
+    except Exception as e:
+        return {"code": 1, "message": str(e)}
+
+
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket, types: str = "*"):
     """WebSocket 事件推送：会话创建/删除等。
 
     用法: ws://host:port/ws/events  （订阅全部）
           ws://host:port/ws/events?types=session_created,session_deleted
+
+    认证开启时需在 query 中带 Authorization=Bearer <token>。
     """
-    from src.core.session import subscribe_events, unsubscribe_events
+    # WebSocket 不受 HTTP 中间件保护，需自行校验
+    if auth_service.enabled:
+        token = websocket.query_params.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not token or not auth_service.verify(token, "/ws/events"):
+            await websocket.close(code=4401, reason="未认证")
+            return
 
     await websocket.accept()
     event_types = [t.strip() for t in types.split(",") if t.strip()] or ["*"]

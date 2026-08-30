@@ -5,6 +5,7 @@
 """
 
 import time
+from typing import Optional
 
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from loguru import logger
@@ -16,7 +17,9 @@ from src.config.settings import (
     CHALLENGE_TYPE_CLOUDFLARE,
 )
 from src.utils.challenge_utils import (
+    TurnstileBox,
     locate_turnstile_box,
+    page_title_is_challenge,
     sync_cf_box_retry,
     sync_cf_retry,
     turnstile_click,
@@ -91,7 +94,10 @@ class CloudflareResolver(ChallengeResolver):
         return CHALLENGE_TYPE_CLOUDFLARE
 
     def detect(self, tab: ChromiumTab) -> bool:
+        # 快路径：标题命中 CF 拦截页标题即判定，跳过全量 html（省 ~10s）
         try:
+            if page_title_is_challenge(tab):
+                return True
             html = tab.html
         except Exception:
             return False
@@ -99,21 +105,30 @@ class CloudflareResolver(ChallengeResolver):
 
     def resolve(self, tab: ChromiumTab, timeout: int = 30) -> bool:
         """尝试解析 Cloudflare 挑战。"""
+        located: Optional[TurnstileBox] = None
         try:
             tab.wait(1)
-            html = tab.html
+            # 快路径：标题命中 CF 拦截页则无需读全量 html，直接按可定位组件分流
+            if page_title_is_challenge(tab):
+                located = locate_turnstile_box(tab, timeout=5)
+                if located is not None:
+                    return self._solve_box(tab, timeout, located)
+                html = tab.html
+            else:
+                html = tab.html
+                # 非拦截页（例如内嵌 Turnstile 的签到页）无需处理，直接放行。
+                if not _under_cf_challenge(html):
+                    return True
+                located = locate_turnstile_box(tab, timeout=5)
+                if located is not None:
+                    return self._solve_box(tab, timeout, located)
         except Exception:
             html = ""
 
         if not html:
             return self._wait_challenge_cleared(tab, timeout)
 
-        # 非拦截页（例如内嵌 Turnstile 的签到页）无需处理，直接放行。
-        if not _under_cf_challenge(html):
-            return True
-
-        # Managed Challenge（JS 自动求解）优先：托管拦截页也常内嵌
-        # cf-turnstile-response，会误判为盒挑战，但托管页没有可点的复选框，
+        # Managed Challenge（JS 自动求解）：托管拦截页没有可点的复选框，
         # 只需等待 JS 自动完成，点击反而超时。
         if _is_managed_challenge(html):
             return self._wait_managed(tab, timeout)
@@ -152,11 +167,11 @@ class CloudflareResolver(ChallengeResolver):
         # 兜底：再等待挑战自动清除
         return self._wait_challenge_cleared(tab, timeout)
 
-    def _solve_box(self, tab: ChromiumTab, timeout: int) -> bool:
+    def _solve_box(self, tab: ChromiumTab, timeout: int, located: Optional[TurnstileBox] = None) -> bool:
         """Turnstile 盒子挑战：尝试点击盒子内的验证按钮。"""
         logger.debug("Cloudflare Turnstile 盒子挑战，尝试点击...")
         tries = max(1, min(timeout // 10, 2))
-        success, _ = sync_cf_box_retry(tab, tries=tries)
+        success, _ = sync_cf_box_retry(tab, tries=tries, prelocated=located)
         if success:
             return True
         return self._wait_challenge_cleared(tab, timeout)

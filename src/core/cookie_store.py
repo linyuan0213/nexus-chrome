@@ -61,3 +61,17 @@ class CookieStore:
                 self._store.pop(domain, None)
             else:
                 self._store.clear()
+
+    def delete_cookie(self, domain: str, name: str) -> bool:
+        """按域名+名称删除单个 Cookie（镜像存储级）。返回是否实际删除。"""
+        with self._lock:
+            cookies = self._store.get(domain, [])
+            remaining = [c for c in cookies if c.get("name") != name]
+            if len(remaining) == len(cookies):
+                return False
+            if remaining:
+                self._store[domain] = remaining
+            else:
+                self._store.pop(domain, None)
+            logger.debug(f"CookieStore: 删除 Cookie → {domain}/{name}")
+            return True

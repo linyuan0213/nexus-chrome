@@ -3,7 +3,7 @@
 与 docs/fp_config_center_api.md 中的 Profile schema 对应。
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +53,11 @@ class FingerprintFields(BaseModel):
     webgl_params: Dict[str, int] = Field(default_factory=dict)
     webgl_viewport_dims: List[int] = Field(default_factory=list[int])
     webgl_extensions_remove: List[str] = Field(default_factory=list)
+    # 平台一致性：时区（与出口 IP 地理位置一致）、电池状态（0..1 / 是否充电中）。
+    # 电池未显式指定时按 profile_id 派生稳定值，避免"永远 100% + 永远充电"的 VM 特征。
+    timezone: str = ""
+    battery_level: Optional[float] = Field(None, ge=0, le=1)
+    battery_charging: Optional[bool] = None
 
 
 class RolloutRule(BaseModel):

@@ -478,3 +478,47 @@ class TestInstanceRecycling:
         pool._evict_if_needed()
         assert "b" not in pool._instances  # 回收空闲的 b
         assert "a" in pool._instances  # 保留使用中的 a
+
+
+class TestNavigateAutoCookie:
+    def test_auto_carry_stored_cookies(self, mock_browser, mock_tab):
+        """未显式传 cookie 时，自动携带会话内已存储的同域名 Cookie。"""
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        # 预置：会话已存有 example.com 的 Cookie
+        session.cookie_store.store("example.com", [{"name": "token", "value": "t-abc", "domain": "example.com"}])
+
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False,
+                "type": "none",
+                "solved": True,
+                "duration_ms": 0,
+            }
+            session.navigate("https://example.com/page")
+
+        # tab.set.cookies 应被调用且包含预置的 token
+        set_mock = mock_tab.set.cookies
+        assert set_mock.called, "未注入 Cookie"
+        injected = set_mock.call_args[0][0]
+        names = [c["name"] for c in injected]
+        assert "token" in names
+
+    def test_explicit_cookie_overrides_stored(self, mock_browser, mock_tab):
+        """显式传入 cookie 时不混入存储（调用方完全控制）。"""
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        session.cookie_store.store("example.com", [{"name": "token", "value": "stored-val", "domain": "example.com"}])
+
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False,
+                "type": "none",
+                "solved": True,
+                "duration_ms": 0,
+            }
+            session.navigate("https://example.com/page", cookie="token=explicit-val")
+
+        injected = mock_tab.set.cookies.call_args[0][0]
+        token = next(c for c in injected if c["name"] == "token")
+        assert token["value"] == "explicit-val"

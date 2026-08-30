@@ -63,9 +63,15 @@ class SessionBase:
         return self._browser.new_tab()  # type: ignore[union-attr]
 
     def _get_active_tab(self) -> ChromiumTab:
-        if not self._active_tab_name or self._active_tab_name not in self._tabs:
-            raise ValueError("没有活跃的标签页，请先调用 navigate")
-        return self._tabs[self._active_tab_name]
+        if self._active_tab_name and self._active_tab_name in self._tabs:
+            return self._tabs[self._active_tab_name]
+        # 无活跃标签页时自动创建一个（about:blank）：截图/交互等操作无需先 navigate。
+        # 典型场景：新建会话后直接用 VNC 导航，或直接点截图。
+        try:
+            return self._create_tab_internal("about:blank")  # type: ignore[attr-defined, reportUnknownMemberType, reportUnknownVariableType]
+        except Exception as e:
+            logger.warning(f"[Session:{self.id}] 自动创建标签页失败: {e}")
+            raise ValueError("没有活跃的标签页，请先调用 navigate") from e
 
     def close_tab(self, tab_name: str) -> None:
         if tab_name not in self._tabs:

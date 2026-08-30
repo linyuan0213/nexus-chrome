@@ -13,6 +13,9 @@ from src.core.fingerprint import FingerprintManager
 from src.core.session.events import publish_event
 from src.core.session.session import Session
 
+# 遗留会话记录保留时长（7 天）：过期即视为 Cookie 已失效，加载时丢弃
+RECOVERED_TTL_SECONDS = 7 * 86400
+
 
 class SessionManager:
     def __init__(
@@ -38,15 +41,26 @@ class SessionManager:
     # ---------- P2-9 会话持久化 ----------
 
     def _load_persisted(self) -> None:
-        """启动时加载持久化的会话注册表（供恢复/列出）。"""
+        """启动时加载持久化的会话注册表（供恢复/列出）。
+
+        遗留记录带 updated_at 时间戳，超过 RECOVERED_TTL_SECONDS（默认 7 天）
+        的视为过期丢弃——Cookie 早已失效，留着只会让列表无限膨胀。
+        """
         if not self._persist_file or not os.path.exists(self._persist_file):
             return
         try:
             with open(self._persist_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for rec in data.get("sessions", []):
+            now = time.time()
+            records = data.get("sessions", [])
+            for rec in records:
+                ts = rec.get("updated_at")
+                if ts and now - ts > RECOVERED_TTL_SECONDS:
+                    continue
                 self._recovered[rec["id"]] = rec
             logger.info(f"[SessionManager] 加载持久化会话注册表: {len(self._recovered)} 条")
+            if len(self._recovered) != len(records):
+                self._save_persisted()  # 裁剪过期记录后回写
         except Exception as e:
             logger.warning(f"[SessionManager] 加载持久化注册表失败: {e}")
 
@@ -60,7 +74,9 @@ class SessionManager:
             for rec in self._recovered.values():
                 recs.append(rec)
             for s in self._sessions.values():
-                recs.append(s.to_dict())
+                d = s.to_dict()
+                d["updated_at"] = time.time()
+                recs.append(d)
             # 去重（以 id 为准）
             by_id: Dict[str, Dict[str, Any]] = {r["id"]: r for r in recs}
             tmp = f"{self._persist_file}.tmp"
@@ -77,6 +93,13 @@ class SessionManager:
     def forget_recovered(self, session_id: str) -> None:
         self._recovered.pop(session_id, None)
         self._save_persisted()
+
+    def clear_recovered(self) -> int:
+        """清空全部遗留会话记录，返回清除数量。"""
+        n = len(self._recovered)
+        self._recovered.clear()
+        self._save_persisted()
+        return n
 
     # ---------- 会话生命周期 ----------
 
