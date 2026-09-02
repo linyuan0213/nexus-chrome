@@ -46,13 +46,16 @@ class BrowserPool:
             inst.retain()
 
     def release(self, key: str) -> None:
-        """会话删除时释放实例（引用 -1）；引用归零后立即关闭实例回收内存。"""
+        """会话删除时释放实例（引用 -1）。
+
+        引用归零后不立即关闭实例：保留空闲实例供短时间内的会话复用
+        （避免频繁创建/销毁 Chrome 进程的开销），空闲超过 TTL 后由
+        _recycle_idle 回收；实例池满时由 _evict_if_needed 驱逐空闲实例。
+        """
         inst = self._instances.get(key)
         if inst is None:
             return
-        remaining = inst.release()
-        if remaining <= 0:
-            self._close_instance(key, "会话释放后无引用")
+        inst.release()
 
     def close_instance(self, key: str, reason: str) -> None:
         """公开接口：关闭并移除实例（供 API 手动关闭）。"""
