@@ -49,7 +49,8 @@ def base_fp_env() -> Dict[str, str]:
         "FP_UA_GREASE_FULL": "99.0.0.0",
         "FP_UAD_PLATFORM_VERSION": "",
         "FP_UAD_MODEL": "",
-        "FP_UAD_ARCH": "x86",
+        # 与 DEFAULT_UA 的 Linux x86_64 一致（x86 会与 UA 自相矛盾）
+        "FP_UAD_ARCH": "x86_64",
         "FP_LANGS": "zh-CN,zh",
         "FP_CANVAS_NOISE": "0",
         "FP_AUDIO_NOISE": "0",

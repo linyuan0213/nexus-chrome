@@ -28,14 +28,23 @@ def build_chrome_args(
     user_data_dir: str,
     port: int,
     screen_size: Optional[tuple[int, int]] = None,
+    languages: Optional[str] = None,
 ) -> List[str]:
-    """根据指纹 profile 构建 Chrome 启动参数（实例级 user_data_dir + 端口）。"""
+    """根据指纹 profile 构建 Chrome 启动参数（实例级 user_data_dir + 端口）。
+
+    languages 为该实例的 FP_LANGS（逗号分隔），用于让 --lang/--accept-lang
+    与画像的 navigator.languages 一致，避免 Accept-Language 头与 JS 语言矛盾；
+    未提供时回退到默认中文语言（与 base_fp_env 的 FP_LANGS 兜底一致）。
+    """
     os.makedirs(user_data_dir, exist_ok=True)
     fp = FingerprintManager(profile_name)
     args: List[str] = []
     if HEADLESS_MODE:
         args.append(HEADLESS_MODE)
     win_w, win_h = screen_size or (WINDOW_WIDTH, WINDOW_HEIGHT)
+    lang_list = (languages or "zh-CN,zh").split(",")
+    lang_list = [tag.strip() for tag in lang_list if tag.strip()]
+    primary_lang = lang_list[0] or "zh-CN"
     args.extend(
         [
             f"--user-data-dir={user_data_dir}",
@@ -62,8 +71,8 @@ def build_chrome_args(
             f"--disk-cache-dir={user_data_dir}/cache",
             "--disk-cache-size=536870912",
             "--media-cache-size=536870912",
-            "--lang=zh-CN",
-            "--accept-lang=zh-CN,zh,en-US,en",
+            f"--lang={primary_lang}",
+            f"--accept-lang={','.join(lang_list)}",
         ]
     )
     if CHROME_RENDER_MODE == "swiftshader":

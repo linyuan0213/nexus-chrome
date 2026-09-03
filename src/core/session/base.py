@@ -110,13 +110,21 @@ class SessionBase:
             logger.warning(f"[Session:{self.id}] 注入 Turnstile 组件修复 JS 失败: {e}")
 
     def _resolve_ua_values(self) -> Dict[str, str]:
-        """从本会话的指纹 env 解析 UA 值（用于网络层请求头一致性）。"""
+        """从本会话的指纹 env 解析 UA 值（用于网络层请求头一致性）。
+
+        base 兜底值必须与 base_fp_env/实例启动环境一致（UA/版本常量来自
+        settings），否则 CDP metadata 会与 Blink 层 fp_config 读到不同的值，
+        出现「JS 说 platformVersion=15.0.0、HTTP 头却是空」的自相矛盾。
+        """
         base = {
             "ua": DEFAULT_UA,
             "ua_full": DEFAULT_UA_FULL,
             "ua_brand": DEFAULT_UA_BRAND,
             "platform": "Linux x86_64",
             "uad_platform": "Linux",
+            "uad_platform_version": "",
+            "uad_arch": "x86_64",
+            "uad_model": "",
         }
         env = self._fp_env
         return {
@@ -125,6 +133,9 @@ class SessionBase:
             "ua_brand": env.get("FP_UA_BRAND", base["ua_brand"]),
             "platform": env.get("FP_PLATFORM", base["platform"]),
             "uad_platform": env.get("FP_UAD_PLATFORM", base["uad_platform"]),
+            "uad_platform_version": env.get("FP_UAD_PLATFORM_VERSION", base["uad_platform_version"]),
+            "uad_arch": env.get("FP_UAD_ARCH", base["uad_arch"]),
+            "uad_model": env.get("FP_UAD_MODEL", base["uad_model"]),
         }
 
     def _apply_ua_metadata(self, tab: ChromiumTab) -> None:
@@ -142,6 +153,8 @@ class SessionBase:
         v = self._resolve_ua_values()
         brand = v["ua_brand"]
         full = v["ua_full"]
+        grease = "99"
+        grease_full = "99.0.0.0"
         try:
             # brands/fullVersionList 必须与 fp_config 的 UaBrands 完全一致
             # （品牌名与顺序：Google Chrome, Chromium, Not_A Brand），
@@ -151,20 +164,24 @@ class SessionBase:
                 userAgent=v["ua"],
                 userAgentMetadata={
                     "brands": [
-                        {"brand": "Not=A?Brand", "version": "99"},
+                        {"brand": "Not=A?Brand", "version": grease},
                         {"brand": "Google Chrome", "version": brand},
                         {"brand": "Chromium", "version": brand},
                     ],
                     "fullVersionList": [
-                        {"brand": "Not=A?Brand", "version": "99.0.0.0"},
+                        {"brand": "Not=A?Brand", "version": grease_full},
                         {"brand": "Google Chrome", "version": full},
                         {"brand": "Chromium", "version": full},
                     ],
                     "fullVersion": full,
                     "platform": v["uad_platform"],
-                    "platformVersion": "",
-                    "architecture": "x86_64",
-                    "model": "",
+                    # platformVersion/architecture/model 必须逐字段取自画像 env，
+                    # 与 fp_config（FP_UAD_PLATFORM_VERSION/FP_UAD_ARCH/FP_UAD_MODEL）
+                    # 完全一致；硬编码空值/x86_64 会让 Sec-CH-UA-Platform-Version 等
+                    # 头缺失或与 JS userAgentData 矛盾（Windows 画像会被 CF 判异常）。
+                    "platformVersion": v["uad_platform_version"],
+                    "architecture": v["uad_arch"],
+                    "model": v["uad_model"],
                     "mobile": False,
                     "bitness": "64",
                 },

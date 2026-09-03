@@ -184,7 +184,14 @@ class ChromeInstance:
             logger.debug(f"[fp:{self.key}] 清理 Chrome 配置锁失败，继续")
         args = [
             chrome,
-            *build_chrome_args(DEFAULT_FINGERPRINT_PROFILE, self.user_data_dir, self.port, self.screen_size),
+            *build_chrome_args(
+                DEFAULT_FINGERPRINT_PROFILE,
+                self.user_data_dir,
+                self.port,
+                self.screen_size,
+                # 语言与画像的 FP_LANGS 一致（Accept-Language 头 ↔ navigator.languages）
+                languages=env.get("FP_LANGS"),
+            ),
         ]
         # 指纹配置以命令行开关传递（--fp-env-<NAME>=value）：
         # Chrome 会过滤渲染/GPU 子进程的环境变量，而开关会透传给所有子进程，
