@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.3.4] - 2026-09-03
+
+### 修复
+
+- **网络层 UA-CH 请求头与 JS `userAgentData` 对齐**：`Network.setUserAgentOverride` 的 `platformVersion`/`architecture`/`model` 改为逐字段取自画像 env（`FP_UAD_PLATFORM_VERSION`/`FP_UAD_ARCH`/`FP_UAD_MODEL`），不再硬编码空串/`x86_64`——修复声称 Windows/macOS 时 `Sec-CH-UA-Platform-Version` 请求头为空或缺失、与页面 JS 高熵值矛盾、被 Cloudflare 判为异常的问题（实测 javlibrary / ourbits 的 Cloudflare 挑战通过）
+- **`Accept-Language` 与 `navigator.languages` 对齐**：`--lang`/`--accept-lang` 改为按实例 `FP_LANGS` 生成，不再全实例固定 `zh-CN`
+- **默认实例架构自洽**：`base_fp_env` 的 `FP_UAD_ARCH` 由 `x86` 修正为 `x86_64`，与默认 Linux x64 UA 一致
+- **内嵌 Turnstile 求解严格限时**：点击后等待 token 的窗口放宽至 15s（实测 token 多在点击后约 7s 到达）；主循环剩余预算不足时不再发起新的 iframe 定位/点击，避免组件无响应时求解拖过 deadline 导致请求长时间挂起
+- **失败导航清理孤儿标签页**：`navigate` 挑战处理/读取异常时关闭本次新建标签页，避免失败重试循环在实例里累积 `about:blank` 孤儿页
+- **nginx 代理超时兜底**：FastAPI `location /` 增加 `proxy_read_timeout 1800s`，慢挑战不再被 nginx 默认 60s 上游超时截断成 504
+
+## [v3.3.3] - 2026-09-02
+
+### 修复
+
+- **会话释放后保留空闲实例**：引用归零后不立即关闭 Chrome 实例，由空闲 TTL 回收，避免频繁会话操作反复重启浏览器
+
 ## [v3.3.2] - 2026-08-30
 
 ### 修复
