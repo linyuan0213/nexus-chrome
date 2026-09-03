@@ -446,7 +446,7 @@ class TestInstanceRecycling:
         assert inst.ref_count == 0
 
     def test_session_delete_releases_instance(self, mock_browser):
-        """删除会话后释放实例引用（引用归零触发关闭）。"""
+        """删除会话后实例引用归零，实例保留为空闲（TTL 后回收，避免反复重启）。"""
         from src.core.browser_manager import BrowserPool
         from src.core.session import SessionManager
 
@@ -457,7 +457,9 @@ class TestInstanceRecycling:
         sm = SessionManager(pool)
         sm.create("s1", "stealth", None, None, mock_browser, instance_key="p1")
         sm.delete("s1")
-        assert "p1" not in pool._instances  # 引用归零后实例被关闭移除
+        assert inst.ref_count == 0  # 引用已归零
+        assert inst.is_idle  # 保留为空闲实例（不立即关闭）
+        assert "p1" in pool._instances  # 由空闲 TTL 回收，而非删除时立刻移除
 
     def test_evict_only_idle(self):
         """实例超限时只回收空闲（无引用）实例。"""
