@@ -123,32 +123,40 @@ class Session(TabMixin):
         elif tab_name is not None and tab_name in self._tabs:
             self.close_tab(tab_name)
         tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer, local_storage=local_storage)
-        orchestrator = ChallengeOrchestrator(timeout=timeout)
-        challenge_result = orchestrator.resolve(tab)
-        domain = urlparse(url).netloc
-        html = ""
         try:
-            html = tab.html
-        except Exception:
-            logger.debug(f"[Session:{self.id}] 读取页面 HTML 失败")
-        self._sync_page_cookies(tab, domain)
+            orchestrator = ChallengeOrchestrator(timeout=timeout)
+            challenge_result = orchestrator.resolve(tab)
+            domain = urlparse(url).netloc
+            html = ""
+            try:
+                html = tab.html
+            except Exception:
+                logger.debug(f"[Session:{self.id}] 读取页面 HTML 失败")
+            self._sync_page_cookies(tab, domain)
 
-        page_url = url
-        page_title = ""
-        try:
-            page_url = tab.url
-            page_title = tab.title
-        except Exception:
-            logger.debug("读取页面 URL/标题失败，使用原始 URL")
+            page_url = url
+            page_title = ""
+            try:
+                page_url = tab.url
+                page_title = tab.title
+            except Exception:
+                logger.debug("读取页面 URL/标题失败，使用原始 URL")
 
-        return {
-            "url": page_url,
-            "title": page_title,
-            "html": html,
-            "cookies": self.cookie_store.as_dict(domain),
-            "cookie_header": self.cookie_store.as_header(domain),
-            "challenge": challenge_result,
-        }
+            return {
+                "url": page_url,
+                "title": page_title,
+                "html": html,
+                "cookies": self.cookie_store.as_dict(domain),
+                "cookie_header": self.cookie_store.as_header(domain),
+                "challenge": challenge_result,
+            }
+        except Exception:
+            # 求解/读取异常：关闭本次新建的标签页，避免失败循环里累积孤儿标签页
+            try:
+                self.close_tab(self._active_tab_name)  # type: ignore[arg-type]
+            except Exception:
+                logger.debug(f"[Session:{self.id}] 清理异常导航的标签页失败，交由 TTL 回收")
+            raise
 
     def get_html(self) -> Dict[str, Any]:
         self.touch()

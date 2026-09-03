@@ -43,10 +43,14 @@ class ChallengeOrchestrator:
         layers: List[str] = []
 
         while time.monotonic() < deadline:
+            # 预算即将耗尽时不再发起新一轮检测/求解（避免卡在超时临界点）
+            if deadline - time.monotonic() < 3:
+                break
             resolver = self.detect(tab)
             if resolver is None:
                 # 无拦截页挑战：尝试解决业务页面内嵌的 Turnstile 组件（如签到页）。
-                embedded_ok = self._solve_embedded_turnstile(tab, max(1, int(deadline - time.monotonic())))
+                remaining = max(1, int(deadline - time.monotonic()))
+                embedded_ok = self._solve_embedded_turnstile(tab, remaining)
                 duration_ms = int((time.monotonic() - start) * 1000)
                 return {
                     "detected": bool(layers),

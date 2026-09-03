@@ -183,15 +183,26 @@ class CloudflareResolver(ChallengeResolver):
         若渲染出复选框，则点击组件 shadow root 内的复选框。组件消失（表单已
         提交）同样视为成功。
 
+        严格按 deadline 运行：每个耗时步骤（定位 iframe、点击判定、等待 token）
+        前都会检查剩余时间，避免因组件无响应（如站点对 IP 限流）无限重试，
+        导致请求挂到网关超时才返回。
+
         Returns:
             是否完成（拿到 token 或表单已提交）。
         """
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + max(1, timeout)
         # 页面根本没有 Turnstile 组件也没有 token → 无需处理。
         if not turnstile_token(tab) and not self._widget_present(tab):
             logger.debug("页面无内嵌 Turnstile 组件，跳过")
             return False
-        while time.monotonic() < deadline:
+
+        def _remaining() -> float:
+            return deadline - time.monotonic()
+
+        # 主循环：预算充足（>4s）才发起一轮完整的「定位 + 点击 + 判定」。
+        # 定位跨域 iframe 本身可能耗时数秒，预算不足时再发起会导致整段
+        # 求解显著超过 deadline（历史上曾拖到网关超时才返回）。
+        while _remaining() > 4:
             if turnstile_token(tab):
                 logger.info("内嵌 Turnstile 已生成 token，等待回调提交")
                 return True
@@ -200,15 +211,29 @@ class CloudflareResolver(ChallengeResolver):
                 return True
             box = locate_turnstile_box(tab)
             if box is not None and turnstile_click(tab, box):
-                for _ in range(8):
+                # 点击后给组件一段不被打断的等待窗口（实测 token 多在点击后
+                # ~7s 内到达，放宽到 15s 避免验证中重点；仍受剩余预算约束）
+                wait_until = time.monotonic() + min(15.0, _remaining())
+                while time.monotonic() < wait_until:
                     if turnstile_token(tab):
                         logger.info("内嵌 Turnstile 点击后生成 token")
                         return True
                     if not self._widget_present(tab):
                         logger.info("内嵌 Turnstile 点击后组件消失，表单已提交")
                         return True
-                    time.sleep(1)
-            time.sleep(2)
+                    time.sleep(0.5)
+            else:
+                time.sleep(0.5)
+
+        # 收尾窗口：剩余预算只够做轻量轮询（不发起新的 iframe 定位/点击）
+        while time.monotonic() < deadline:
+            if turnstile_token(tab):
+                logger.info("内嵌 Turnstile 已生成 token，等待回调提交")
+                return True
+            if not self._widget_present(tab):
+                logger.info("内嵌 Turnstile 组件已消失，表单可能已提交")
+                return True
+            time.sleep(0.4)
         logger.warning("内嵌 Turnstile 组件在超时时间内未能完成")
         return False
 
