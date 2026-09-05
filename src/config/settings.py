@@ -94,9 +94,9 @@ CHALLENGE_TIMEOUT = int(os.getenv("CHALLENGE_TIMEOUT", "60"))
 CHALLENGE_RETRY_COUNT = int(os.getenv("CHALLENGE_RETRY_COUNT", "3"))
 
 # UA 兜底值（画像 env 未提供时使用；与 patched Chromium 发布版本保持一致）
-DEFAULT_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-DEFAULT_UA_FULL = "153.0.7991.0"
-DEFAULT_UA_BRAND = "153"
+DEFAULT_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+DEFAULT_UA_FULL = "155.0.8044.0"
+DEFAULT_UA_BRAND = "155"
 
 # ============================================================
 # 指纹配置

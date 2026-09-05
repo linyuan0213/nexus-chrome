@@ -2,7 +2,7 @@
   "profile_id": "persona_apple_m",
   "name": "Apple M 系列 (macOS, ANGLE Metal)",
   "fingerprint": {
-    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
     "platform": "MacIntel",
     "uad_platform": "macOS",
     "uad_platform_version": "15.3.0",

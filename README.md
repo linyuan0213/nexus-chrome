@@ -246,7 +246,7 @@ curl -X POST http://localhost:9850/api/profiles \
     "profile_id": "mac_work",
     "name": "macOS 自洽指纹",
     "fingerprint": {
-      "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
       "platform": "MacIntel",
       "uad_platform": "macOS",
       "webgl_vendor": "Google Inc. (Apple)",
@@ -294,7 +294,7 @@ curl -X POST http://localhost:9850/sessions/work/click \
 | navigator.webdriver | true | false | **false** |
 | navigator.plugins.length | 0 | 5 | **5** |
 | window.chrome | undefined | object | **object** |
-| UA 字符串 | HeadlessChrome | Chrome | **Chrome/153 无泄漏** |
+| UA 字符串 | HeadlessChrome | Chrome | **Chrome/155 无泄漏** |
 | CDP 检测 | Detected | Not detected | **cdc_ 未定义** |
 | TLS 指纹 | Mismatch | 与 Chrome 一致 | **cipher 哈希与 Chrome 一致** |
 

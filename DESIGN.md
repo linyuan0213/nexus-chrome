@@ -244,7 +244,7 @@ src/
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `CHROME_PATH` | `/opt/patched-chrome/chrome` | patched Chromium 路径 |
-| `CHROME_VERSION` | `153.0.7991.0` | 发布版本（对齐 Chromium，GitHub Release）|
+| `CHROME_VERSION` | `155.0.8044.0` | 发布版本（对齐 Chromium，GitHub Release）|
 | `MAX_BROWSERS` | `5` | 并发指纹实例上限 |
 | `WINDOW_SIZE` | `1366x768` | 窗口/显示/屏幕指纹尺寸 |
 | `USER_DATA_PATH` | `~/.cache/nexus-chrome/user_data` | 默认实例数据 |

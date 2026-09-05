@@ -2,7 +2,7 @@
   "profile_id": "persona_amd_radeon",
   "name": "AMD Radeon (Windows, ANGLE D3D11)",
   "fingerprint": {
-    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
     "platform": "Win32",
     "uad_platform": "Windows",
     "uad_platform_version": "15.0.0",
