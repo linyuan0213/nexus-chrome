@@ -255,6 +255,8 @@ src/
 
 ## 发布与部署
 
+> 完整操作见 [docs/CHROME_RELEASE.md](docs/CHROME_RELEASE.md)（构建→GitHub 发布→冒烟→版本切换→回滚 SOP）
+
 - patched Chromium 构建：独立工程 **chromefp**（本机 `~/python/chromefp`，单版本跟随模型；`cfp build/migrate` + `remote.sh`），不再内嵌于本仓库
 - 发布：`gh release create chrome-<版本>` 到 `linyuan0213/nexus-chrome-bin`
 - Docker：`ARG CHROME_VERSION` 下载 Release 包 + SHA256 校验，自包含补丁版 Chrome
