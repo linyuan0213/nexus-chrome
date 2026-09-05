@@ -14,7 +14,7 @@ services:
       context: .
       args:
         # 对应 nexus-chrome-bin 的 GitHub Release tag: chrome-<版本>
-        CHROME_VERSION: "153.0.7991.0"
+        CHROME_VERSION: "155.0.8044.0"
     image: linyuan0213/nexus-chrome:latest
     container_name: nexus-chrome
     restart: unless-stopped
