@@ -16,7 +16,6 @@ __pycache__
 .playwright-mcp
 
 # 本地工作目录不进镜像
-fp_patches/
 data/
 tmp/
 
