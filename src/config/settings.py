@@ -93,10 +93,30 @@ CHALLENGE_TYPE_NONE = "none"
 CHALLENGE_TIMEOUT = int(os.getenv("CHALLENGE_TIMEOUT", "60"))
 CHALLENGE_RETRY_COUNT = int(os.getenv("CHALLENGE_RETRY_COUNT", "3"))
 
-# UA 兜底值（画像 env 未提供时使用；与 patched Chromium 发布版本保持一致）
-DEFAULT_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
-DEFAULT_UA_FULL = "155.0.8044.0"
-DEFAULT_UA_BRAND = "155"
+
+# UA 兜底值：与 patched Chromium 发布版本保持一致。
+# 版本号不再手工硬编码 —— 单一事实源 = 仓库根 .chrome-version；
+# 容器内由镜像 ARG 注入的 CHROME_VERSION 环境变量覆盖（同一文件打包进镜像）。
+def _read_chrome_version() -> str:
+    from_env = os.getenv("CHROME_VERSION", "").strip()
+    if from_env:
+        return from_env
+    try:
+        v = (Path(__file__).resolve().parents[2] / ".chrome-version").read_text().strip()
+        if v:
+            return v
+    except OSError:
+        pass
+    return "155.0.8044.0"
+
+
+_CHROME_VERSION = _read_chrome_version()
+_CHROME_MAJOR = _CHROME_VERSION.split(".", 1)[0]
+DEFAULT_UA = (
+    f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_CHROME_MAJOR}.0.0.0 Safari/537.36"
+)
+DEFAULT_UA_FULL = _CHROME_VERSION
+DEFAULT_UA_BRAND = _CHROME_MAJOR
 
 # ============================================================
 # 指纹配置

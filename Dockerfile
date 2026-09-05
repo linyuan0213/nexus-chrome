@@ -14,6 +14,8 @@ ARG CHROME_VERSION=155.0.8044.0
 ARG TARGETARCH
 
 ENV CHROME_PATH=/opt/patched-chrome/chrome
+# 版本号注入运行期（settings.py UA 兜底 / 版本展示读取；单一事实源见 .chrome-version）
+ENV CHROME_VERSION=${CHROME_VERSION}
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN
 ENV LC_ALL=zh_CN.UTF-8
