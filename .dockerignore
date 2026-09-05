@@ -18,6 +18,7 @@ __pycache__
 # 本地工作目录不进镜像
 data/
 data155/
+.smoke-*
 tmp/
 
 # 前端：node_modules/dist 不进镜像（dist 由 frontend-build 阶段产出后单独拷贝）
