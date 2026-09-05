@@ -27,7 +27,11 @@ CF_URL = "https://www.javlibrary.com/tw/"
 
 
 def run(*cmd: str) -> None:
-    subprocess.run(list(cmd), cwd=ROOT, check=True, capture_output=True, text=True)
+    r = subprocess.run(list(cmd), cwd=ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("命令失败:", " ".join(cmd))
+        print((r.stderr or r.stdout)[-1500:])
+        raise SystemExit(r.returncode)
 
 
 def api(path: str, method: str = "GET", payload: dict | None = None) -> dict:
@@ -80,6 +84,7 @@ def main() -> None:
     ap.add_argument("--down", action="store_true", help="冒烟结束后拆除旁路栈")
     a = ap.parse_args()
     ver = a.version
+    project = "smoke" + ver.replace(".", "-")  # compose 项目名不允许 `.`
 
     cache = ROOT / "chrome-cache" / f"chrome-{ver}-x64.tar.gz"
     if not cache.exists():
@@ -87,35 +92,49 @@ def main() -> None:
         sys.exit(2)
 
     data_dir = ROOT / f".smoke-{ver}"
-    override = ROOT / f".smoke-{ver}.yml"
+    stack = ROOT / f".smoke-{ver}.yml"
     if not data_dir.exists():
         data_dir.mkdir()
         shutil.copy(ROOT / "data/fp_config_center.db", data_dir / "fp_config_center.db")
-    override.write_text(
+    # 完整独立 compose（不叠加 docker-compose.yml，避免 ports 列表合并占用 9850）
+    stack.write_text(
         f"""services:
   nexus-chrome:
-    image: linyuan0213/nexus-chrome-smoke:{ver}
-    container_name: nexus-chrome-smoke-{ver}
     build:
+      context: .
       args:
         CHROME_VERSION: "{ver}"
+    image: linyuan0213/nexus-chrome-smoke:{ver}
+    container_name: nexus-chrome-smoke-{ver}
+    restart: "no"
     ports:
       - "{PORT}:9850"
+    environment:
+      - TZ=Asia/Shanghai
+      - APP_HOST=0.0.0.0
+      - APP_PORT=9850
+      - CHROME_RENDER_MODE=vulkan
+      - VNC_PASSWORD=smokepw
+      - AUTH_PASSWORD=
+      - DATA_DIR=/app/data
+      - PROFILE_DATA_DIR=/app/data/profiles
+      - USER_DATA_PATH=/app/data/user_data
     volumes:
       - ./{data_dir.name}:/app/data
       - /dev/shm:/dev/shm
+    shm_size: "2gb"
+    security_opt:
+      - seccomp:unconfined
 """
     )
-    print(f"==> 启动旁路冒烟栈 chrome-{ver}（{PORT}，project smoke-{ver}）")
+    print(f"==> 启动旁路冒烟栈 chrome-{ver}（{PORT}，project {project}）")
     run(
         "docker",
         "compose",
         "-p",
-        f"smoke-{ver}",
+        project,
         "-f",
-        "docker-compose.yml",
-        "-f",
-        override.name,
+        stack.name,
         "up",
         "-d",
         "--build",
@@ -142,14 +161,12 @@ def main() -> None:
             "docker",
             "compose",
             "-p",
-            f"smoke-{ver}",
+            project,
             "-f",
-            "docker-compose.yml",
-            "-f",
-            override.name,
+            stack.name,
             "down",
         )
-        override.unlink(missing_ok=True)
+        stack.unlink(missing_ok=True)
 
     summary = {"version": ver, "ok": ok, "results": results}
     print(json.dumps(summary, ensure_ascii=False, indent=1))
