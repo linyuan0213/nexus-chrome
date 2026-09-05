@@ -85,6 +85,29 @@ class TestRenderEnv:
         env = render_env(profile.fingerprint)
         assert "FP_RTC_IP" not in env
 
+    def test_arbitrary_ua_derives_brand_and_full(self):
+        """仅提供任意 UA 字符串（可远低于当前基线）也应派生自洽 brand/full。"""
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/96.0.4664.45 Safari/537.36"
+        )
+        profile.fingerprint.ua_brand_version = ""
+        profile.fingerprint.ua_full_version = ""
+        env = render_env(profile.fingerprint)
+        assert env["FP_UA_BRAND"] == "96"
+        assert env["FP_UA_FULL"] == "96.0.0.0"
+
+    def test_explicit_full_version_wins_over_derivation(self):
+        profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
+        profile.fingerprint.ua = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/96.0.4664.45 Safari/537.36"
+        )
+        profile.fingerprint.ua_brand_version = ""
+        profile.fingerprint.ua_full_version = "96.0.4664.110"
+        env = render_env(profile.fingerprint)
+        assert env["FP_UA_BRAND"] == "96"
+        assert env["FP_UA_FULL"] == "96.0.4664.110"
+
     def test_webgl_params_rendered_as_enum_pairs(self):
         profile = FpProfile(**json.loads(DEFAULT_PROFILE_JSON))
         profile.fingerprint.webgl_params = {"MAX_TEXTURE_SIZE": 16384, "MAX_SAMPLES": 8}

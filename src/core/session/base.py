@@ -15,6 +15,7 @@ from src.config.scripts import CF_WIDGET_FIX_JS
 from src.config.settings import DEFAULT_UA, DEFAULT_UA_BRAND, DEFAULT_UA_FULL
 from src.core.cookie_store import CookieStore
 from src.core.fingerprint import FingerprintManager
+from src.fp.ua import resolve_ua_fields
 
 
 class SessionBase:
@@ -127,6 +128,20 @@ class SessionBase:
             "uad_model": "",
         }
         env = self._fp_env
+        # 会话级任意 UA（user_agent 参数）优先：brand/fullVersion 从该 UA 派生，
+        # 避免与画像/兜底元数据不一致（支持声称任意版本的 UA）
+        if self._user_agent:
+            resolved = resolve_ua_fields(self._user_agent)
+            return {
+                "ua": resolved["ua"] or DEFAULT_UA,
+                "ua_full": resolved["ua_full"] or DEFAULT_UA_FULL,
+                "ua_brand": resolved["ua_brand"] or DEFAULT_UA_BRAND,
+                "platform": env.get("FP_PLATFORM", base["platform"]),
+                "uad_platform": env.get("FP_UAD_PLATFORM", base["uad_platform"]),
+                "uad_platform_version": env.get("FP_UAD_PLATFORM_VERSION", base["uad_platform_version"]),
+                "uad_arch": env.get("FP_UAD_ARCH", base["uad_arch"]),
+                "uad_model": env.get("FP_UAD_MODEL", base["uad_model"]),
+            }
         return {
             "ua": env.get("FP_UA", base["ua"]),
             "ua_full": env.get("FP_UA_FULL", base["ua_full"]),

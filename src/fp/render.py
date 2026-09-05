@@ -16,6 +16,7 @@ from loguru import logger
 
 from src.fp.platform_fonts import merge_font_block, platform_font_config
 from src.fp.profile import FingerprintFields
+from src.fp.ua import derive_brand_version, derive_full_version
 
 # Profile 字段 → 环境变量名
 ENV_MAP: Dict[str, str] = {
@@ -176,6 +177,17 @@ def render_env(fingerprint: FingerprintFields, profile_id: Optional[str] = None)
             env[var] = "1" if value else "0"
         else:
             env[var] = str(value)
+    # 支持任意 UA：仅提供 ua 时按 Chrome/<major> 自动派生 brand/full，
+    # 避免 JS userAgentData 与网络层 client-hint 回退到二进制版本造成不一致
+    if "FP_UA" in env:
+        if "FP_UA_BRAND" not in env:
+            brand = derive_brand_version(env["FP_UA"])
+            if brand:
+                env["FP_UA_BRAND"] = brand
+        if "FP_UA_FULL" not in env:
+            full = derive_full_version(env["FP_UA"])
+            if full:
+                env["FP_UA_FULL"] = full
     for key, var in LIST_ENV_MAP.items():
         value = getattr(fingerprint, key)
         if value:
