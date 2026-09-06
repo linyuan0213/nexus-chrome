@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.0] - 2026-09-06
+
+### 新增
+
+- **支持任意 UA**：指纹画像/会话可声明任意版本 UA（含远低于/高于当前基线的版本），`brand`/`fullVersion` 由 UA 的 `Chrome/<major>` 自动派生（`src/fp/ua.py`），JS `userAgentData` 与网络层 UA-CH（brands/fullVersionList）自动自洽，不再回退二进制版本造成不一致
+- **冒烟脚本 `scripts/smoke_chrome.py`**：独立 compose project（不触碰生产容器）一键跑 mac/windows 身份在 deviceandbrowserinfo 的 `isBot=false` 与 javlib Cloudflare 过盾矩阵，输出 JSON/退出码，支持 `--down` 清场
+- **升级脚本 `scripts/set-chrome-version.sh`**：以 `.chrome-version` 为 Chrome 版本单一事实源，一键同步 Dockerfile ARG / compose / 文档引用
+- **Chrome 版本双通道一致性测试**：`.chrome-version` 文件与镜像内 `ENV CHROME_VERSION` 两条读取通道一致性（`tests/test_chrome_version.py`）
+
+### 变更
+
+- **patched Chrome 升级 153.0.7991.0 → 155.0.8044.0**：Dockerfile/`.dockerignore`/compose/`.chrome-version`/UA 兜底全引用对齐；镜像默认取 155；x64/arm64 发布资产（含 `build-manifest.txt` 溯源）见 `linyuan0213/nexus-chrome-bin`
+
+### 重构
+
+- **fp_patches 迁出为独立工程 chromefp**：Chrome 指纹补丁/构建/发布链路不再内嵌本仓库，本仓库仅消费 `chrome-<版本>` 二进制（GitHub release + SHA256 校验）
+
 ## [v3.3.4] - 2026-09-03
 
 ### 修复
