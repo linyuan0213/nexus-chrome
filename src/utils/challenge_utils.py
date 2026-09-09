@@ -239,6 +239,9 @@ def turnstile_click(page: ChromiumTab, target_box: TurnstileBox, max_attempts: i
                 continue
             return False
 
+        # 记录点击前 token：成功后只认“点击后新生成”的 token，
+        # 避免把页面残留的旧/过期 token 误判为本次通过
+        token_before = turnstile_token(page)
         target = _checkbox_viewport_center(btn, origin)
         clicked = False
         if target is not None:
@@ -263,7 +266,9 @@ def turnstile_click(page: ChromiumTab, target_box: TurnstileBox, max_attempts: i
         if not clicked:
             continue
 
-        # 等待本次点击的判定结果（成功标记出现或拿到 token 或页面已脱离挑战）
+        # 等待本次点击的判定结果（成功标记出现或拿到“点击后新”token 或页面已脱离挑战）。
+        # 一旦判定成功立即返回——禁止后续重试点击，避免低配设备上因判定慢一拍
+        # 导致“成功后再次点击/重置”，引发 token 重复提交（变勾后报错）。
         deadline = time.monotonic() + _CLICK_JUDGE_TIMEOUT_S
         while time.monotonic() < deadline:
             try:
@@ -272,7 +277,8 @@ def turnstile_click(page: ChromiumTab, target_box: TurnstileBox, max_attempts: i
             except Exception as e:
                 logger.debug(f"turnstile_click: success 判定失败（盒子可能已重渲染）: {e}")
             try:
-                if turnstile_token(page):
+                token_now = turnstile_token(page)
+                if token_now and token_now != token_before:
                     return True
             except Exception as e:
                 logger.debug(f"turnstile_click: token 读取失败: {e}")

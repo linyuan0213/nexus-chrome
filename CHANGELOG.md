@@ -2,6 +2,12 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.1] - 2026-09-09
+
+### 修复
+
+- **内嵌 Turnstile 竞态导致“变勾后报错/反复验证”**：低配设备上判定慢一拍可能造成“成功后再次点击”或把残留旧 token 误判为通过，引发 token 重复/过期提交。现改为：只认点击后新生成的 token、检测 expired/error 态、成功后立即锁定禁止重试、expired 连续出现即停止（不再无限重试）
+
 ## [v3.4.0] - 2026-09-06
 
 ### 新增

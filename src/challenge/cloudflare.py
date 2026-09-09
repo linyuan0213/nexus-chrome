@@ -191,47 +191,90 @@ class CloudflareResolver(ChallengeResolver):
             是否完成（拿到 token 或表单已提交）。
         """
         deadline = time.monotonic() + max(1, timeout)
+        initial_token = turnstile_token(tab)
         # 页面根本没有 Turnstile 组件也没有 token → 无需处理。
-        if not turnstile_token(tab) and not self._widget_present(tab):
+        if not initial_token and not self._widget_present(tab):
             logger.debug("页面无内嵌 Turnstile 组件，跳过")
             return False
 
         def _remaining() -> float:
             return deadline - time.monotonic()
 
+        def _widget_expired() -> bool:
+            """检测 Turnstile expired/error 覆盖层（此时残留旧 token 不可信）。"""
+            try:
+                body = tab.ele("tag:body", timeout=1)  # type: ignore[union-attr]
+                text: str = str(body.text) if body else ""
+            except Exception:
+                return False
+            low = text.lower()
+            return (
+                "verification expired" in low
+                or "验证已过期" in text
+                or "验证已失效" in text
+                or "verification failed" in low
+                or "验证失败，请重试" in text
+            )
+
+        def _fresh_token_ok() -> bool:
+            """成功判据：token 非空且是进入求解后新生成的，且未处于 expired/error。"""
+            if _widget_expired():
+                return False
+            tok = turnstile_token(tab)
+            return bool(tok) and (tok != initial_token or not initial_token)
+
+        # 进入即已有 token 且组件状态正常（如非交互组件自动完成）→ 视为已通过
+        if initial_token and not _widget_expired():
+            logger.info("内嵌 Turnstile 进入时已有有效 token")
+            return True
+
+        expired_streak = 0
         # 主循环：预算充足（>4s）才发起一轮完整的「定位 + 点击 + 判定」。
         # 定位跨域 iframe 本身可能耗时数秒，预算不足时再发起会导致整段
         # 求解显著超过 deadline（历史上曾拖到网关超时才返回）。
         while _remaining() > 4:
-            if turnstile_token(tab):
-                logger.info("内嵌 Turnstile 已生成 token，等待回调提交")
-                return True
             if not self._widget_present(tab):
                 logger.info("内嵌 Turnstile 组件已消失，表单可能已提交")
                 return True
+            if _fresh_token_ok():
+                logger.info("内嵌 Turnstile 已生成新 token，等待回调提交")
+                return True
+            if _widget_expired():
+                # expired/error 状态：不再盲目重试点击，连续出现即停止，
+                # 避免“一直重复验证但不成功”的死循环
+                expired_streak += 1
+                logger.warning(f"内嵌 Turnstile 进入 expired/error 态（连续 {expired_streak} 次）")
+                if expired_streak >= 2:
+                    logger.warning("expired/error 连续出现，停止重试（需人工/新会话重试）")
+                    return False
+                time.sleep(2)
+                continue
+            expired_streak = 0
             box = locate_turnstile_box(tab)
             if box is not None and turnstile_click(tab, box):
                 # 点击后给组件一段不被打断的等待窗口（实测 token 多在点击后
                 # ~7s 内到达，放宽到 15s 避免验证中重点；仍受剩余预算约束）
                 wait_until = time.monotonic() + min(15.0, _remaining())
                 while time.monotonic() < wait_until:
-                    if turnstile_token(tab):
-                        logger.info("内嵌 Turnstile 点击后生成 token")
-                        return True
                     if not self._widget_present(tab):
                         logger.info("内嵌 Turnstile 点击后组件消失，表单已提交")
                         return True
+                    if _fresh_token_ok():
+                        logger.info("内嵌 Turnstile 点击后生成新 token")
+                        return True
+                    if _widget_expired():
+                        break
                     time.sleep(0.5)
             else:
                 time.sleep(0.5)
 
         # 收尾窗口：剩余预算只够做轻量轮询（不发起新的 iframe 定位/点击）
         while time.monotonic() < deadline:
-            if turnstile_token(tab):
-                logger.info("内嵌 Turnstile 已生成 token，等待回调提交")
-                return True
             if not self._widget_present(tab):
                 logger.info("内嵌 Turnstile 组件已消失，表单可能已提交")
+                return True
+            if _fresh_token_ok():
+                logger.info("内嵌 Turnstile 已生成新 token，等待回调提交")
                 return True
             time.sleep(0.4)
         logger.warning("内嵌 Turnstile 组件在超时时间内未能完成")
