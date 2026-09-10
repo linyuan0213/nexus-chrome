@@ -25,8 +25,7 @@ class TabMixin(MediaMixin):
         tab.set.load_mode.none()  # type: ignore[union-attr]
         self._apply_init_js(tab)
         self._apply_ua_metadata(tab)  # type: ignore[union-attr]
-        if self._user_agent:
-            tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
+        self._apply_user_agent(tab)
         tab_name = name or self._auto_tab_name()
         if tab_name in self._tabs:
             tab.close()  # type: ignore[union-attr]

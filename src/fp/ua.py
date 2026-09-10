@@ -10,6 +10,35 @@ import re
 
 _CHROME_MAJOR_RE = re.compile(r"\bChrome/(\d+)\.")
 
+# UA 平台标记 → (navigator.platform, Sec-CH-UA-Platform / userAgentData.platform)
+# 顺序敏感：iOS/Android 必须排在 Linux/Macintosh 之前。
+_PLATFORM_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("iPhone",), "iPhone", "iOS"),
+    (("iPad",), "iPad", "iOS"),
+    (("iPod",), "iPod", "iOS"),
+    (("Android",), "Linux armv8l", "Android"),
+    (("Windows",), "Win32", "Windows"),
+    (("Macintosh", "Mac OS X"), "MacIntel", "macOS"),
+    (("CrOS",), "Linux x86_64", "Chrome OS"),
+    (("Linux",), "Linux x86_64", "Linux"),
+)
+
+
+def derive_platform(ua: str | None) -> dict[str, str]:
+    """从 UA 推导 JS `navigator.platform` 与 UA-CH 平台，保证与 UA 声明自洽。
+
+    会话级 UA 覆盖（CreateSessionRequest.user_agent）过去只改 UA 字符串，
+    `navigator.platform` 仍由实例启动时的指纹 env 决定，导致「UA 说 Mac、
+    platform 说 Linux」的矛盾，被 Cloudflare Turnstile 判定为异常而拒绝渲染。
+    无识别结果时返回空 dict，交由调用方回退实例原值。
+    """
+    if not ua:
+        return {}
+    for markers, js_platform, uad_platform in _PLATFORM_RULES:
+        if any(marker in ua for marker in markers):
+            return {"js_platform": js_platform, "uad_platform": uad_platform}
+    return {}
+
 
 def ua_major(ua: str) -> str | None:
     m = _CHROME_MAJOR_RE.search(ua)

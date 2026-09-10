@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.3] - 2026-09-10
+
+### 修复
+
+- **会话级 UA 覆盖未同步 `navigator.platform`**：`CreateSessionRequest.user_agent` 过去只改 UA 字符串与 brand/fullVersion，`navigator.platform` 仍由实例启动的指纹 env 决定，形成「UA 说 Mac、platform 说 Linux」的自相矛盾；Cloudflare Turnstile 会因此拒绝渲染组件，页面出现空 token 的 `.cf-turnstile` 容器（表现为一直过不了盾）。现按 UA 派生平台，`_apply_user_agent` 统一用 `Emulation.setUserAgentOverride` 覆盖 UA + platform，`_resolve_ua_values` 的 `uad_platform` 同步跟随会话 UA（`src/fp/ua.py`、`src/core/session/base.py`）
+- **browser_fetch 非 GET 标签页缺少网络层 UA-CH 覆盖**：`_create_fetch_tab` 未调用 `_apply_ua_metadata`，与 `_create_tab_internal`/`create_tab` 不一致，HTTP 头与 JS 指纹可能矛盾；现已对齐（`src/core/session/fetch.py`）
+
 ## [v3.4.2] - 2026-09-10
 
 ### 修复

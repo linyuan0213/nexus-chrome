@@ -15,7 +15,7 @@ from src.config.scripts import CF_WIDGET_FIX_JS
 from src.config.settings import DEFAULT_UA, DEFAULT_UA_BRAND, DEFAULT_UA_FULL
 from src.core.cookie_store import CookieStore
 from src.core.fingerprint import FingerprintManager
-from src.fp.ua import resolve_ua_fields
+from src.fp.ua import derive_platform, resolve_ua_fields
 
 
 class SessionBase:
@@ -97,6 +97,22 @@ class SessionBase:
 
     # ---------- 指纹 / 网络层一致性原语 ----------
 
+    def _apply_user_agent(self, tab: ChromiumTab) -> None:
+        """覆盖会话级 UA，并同步 Emulation platform。
+
+        仅改 UA 字符串会让 `navigator.platform` 保持实例原值（如 Linux），与
+        Mac/Windows UA 自相矛盾，被 Cloudflare Turnstile 判为异常而拒绝渲染。
+        这里按 UA 派生 platform 一起覆盖（无识别结果时退回二进制原值）。
+        """
+        ua = self._user_agent
+        if not ua:
+            return
+        platform = derive_platform(ua).get("js_platform")
+        if platform:
+            tab.set.user_agent(ua, platform=platform)  # type: ignore[union-attr]
+        else:
+            tab.set.user_agent(ua)  # type: ignore[union-attr]
+
     def _apply_init_js(self, tab: ChromiumTab) -> None:
         """在导航前注入 Turnstile 组件修复，提升挑战通过率。
 
@@ -132,12 +148,15 @@ class SessionBase:
         # 避免与画像/兜底元数据不一致（支持声称任意版本的 UA）
         if self._user_agent:
             resolved = resolve_ua_fields(self._user_agent)
+            # 平台必须随 UA 覆盖：否则 Cookie 级 UA 是 Mac、platform/Sec-CH-UA-Platform
+            # 仍是实例的 Linux，Cloudflare Turnstile 会因身份自相矛盾拒绝渲染组件。
+            plat = derive_platform(self._user_agent)
             return {
                 "ua": resolved["ua"] or DEFAULT_UA,
                 "ua_full": resolved["ua_full"] or DEFAULT_UA_FULL,
                 "ua_brand": resolved["ua_brand"] or DEFAULT_UA_BRAND,
-                "platform": env.get("FP_PLATFORM", base["platform"]),
-                "uad_platform": env.get("FP_UAD_PLATFORM", base["uad_platform"]),
+                "platform": plat.get("js_platform") or env.get("FP_PLATFORM", base["platform"]),
+                "uad_platform": plat.get("uad_platform") or env.get("FP_UAD_PLATFORM", base["uad_platform"]),
                 "uad_platform_version": env.get("FP_UAD_PLATFORM_VERSION", base["uad_platform_version"]),
                 "uad_arch": env.get("FP_UAD_ARCH", base["uad_arch"]),
                 "uad_model": env.get("FP_UAD_MODEL", base["uad_model"]),

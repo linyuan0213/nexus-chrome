@@ -64,8 +64,7 @@ class Session(TabMixin):
             tab.set.load_mode.none()  # type: ignore[union-attr]
             self._apply_init_js(tab)
             self._apply_ua_metadata(tab)  # type: ignore[union-attr]
-            if self._user_agent:
-                tab.set.user_agent(self._user_agent)  # type: ignore[union-attr]
+            self._apply_user_agent(tab)
             # Cookie：显式传入优先；未传时自动携带会话内已存储的同域名 Cookie
             domain = urlparse(url).netloc
             cookies = self._parse_cookie_header(cookie) if cookie else []

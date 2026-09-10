@@ -7,6 +7,12 @@ from src.fp.profile import FpProfile, RolloutRule
 from src.fp.render import render_env
 from src.fp.store import store
 from src.fp.sync_client import get_profile, get_profile_local, invalidate_cache
+from src.fp.ua import derive_platform
+
+_MAC_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    " (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
 
 REPO_FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "deploy", "fonts")
 
@@ -224,6 +230,45 @@ class TestRenderEnv:
         profile.fingerprint.timezone = "Asia/Tokyo"
         env = render_env(profile.fingerprint)
         assert env["TZ"] == "Asia/Tokyo"
+
+
+class TestDerivePlatform:
+    """会话级 UA 覆盖必须同时派生出匹配的 JS/UA-CH 平台。"""
+
+    def test_macos(self):
+        assert derive_platform(_MAC_UA) == {"js_platform": "MacIntel", "uad_platform": "macOS"}
+
+    def test_windows(self):
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36"
+        assert derive_platform(ua) == {"js_platform": "Win32", "uad_platform": "Windows"}
+
+    def test_android_matches_before_linux(self):
+        ua = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/151.0.0.0 Mobile Safari/537.36"
+        assert derive_platform(ua) == {"js_platform": "Linux armv8l", "uad_platform": "Android"}
+
+    def test_ios(self):
+        ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"
+        assert derive_platform(ua) == {"js_platform": "iPhone", "uad_platform": "iOS"}
+
+    def test_linux_and_unknown(self):
+        assert derive_platform("Mozilla/5.0 (X11; Linux x86_64) Chrome/151.0.0.0") == {
+            "js_platform": "Linux x86_64",
+            "uad_platform": "Linux",
+        }
+        assert derive_platform("") == {}
+        assert derive_platform(None) == {}
+
+    def test_resolve_ua_values_overrides_platform_with_ua(self):
+        """Mac UA + Linux 实例 env：platform/uad_platform 必须跟随 UA，否则自相矛盾。"""
+        from src.core.session.session import Session
+
+        s = Session.__new__(Session)
+        s._fp_env = {"FP_PLATFORM": "Linux x86_64", "FP_UAD_PLATFORM": "Linux"}
+        s._user_agent = _MAC_UA
+        v = s._resolve_ua_values()
+        assert v["platform"] == "MacIntel"
+        assert v["uad_platform"] == "macOS"
+        assert v["ua_brand"] == "151"
 
 
 class TestProfileStore:
