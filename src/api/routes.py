@@ -182,6 +182,20 @@ async def input_text(session_id: str, request: InputRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@sessions_router.post("/{session_id}/turnstile", response_model=ApiResponse)
+async def solve_turnstile(session_id: str, timeout: int = Query(25)):
+    """显式求解页面内嵌 Turnstile（点击复选框并等待 token）."""
+    try:
+        sm = _get_sm()
+        session = sm.get(session_id)
+        result = await asyncio.to_thread(session.solve_turnstile, timeout)
+        return ApiResponse(code=0, message="ok", data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @sessions_router.post("/{session_id}/execute", response_model=ApiResponse)
 async def execute_js(session_id: str, request: ExecuteRequest):
     try:

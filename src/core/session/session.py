@@ -8,6 +8,7 @@ from DrissionPage import Chromium
 from DrissionPage._pages.chromium_tab import ChromiumTab
 from loguru import logger
 
+from src.challenge.cloudflare import CloudflareResolver
 from src.challenge.resolver import ChallengeOrchestrator
 from src.config.settings import CHALLENGE_TIMEOUT
 from src.core.cookie_store import CookieStore
@@ -202,6 +203,13 @@ class Session(TabMixin):
     def execute(self, script: str) -> Any:
         self.touch()
         return self._get_active_tab().run_js(script)  # type: ignore[union-attr]
+
+    def solve_turnstile(self, timeout: int = 25) -> Dict[str, Any]:
+        """显式触发内嵌 Turnstile 求解（点击复选框/等待 token），供搜索等表单场景调用."""
+        self.touch()
+        tab = self._get_active_tab()
+        ok = CloudflareResolver().solve_embedded_widget(tab, timeout=timeout)
+        return {"solved": bool(ok)}
 
     # ---------- 代理 ----------
 

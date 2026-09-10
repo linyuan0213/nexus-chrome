@@ -192,8 +192,13 @@ class CloudflareResolver(ChallengeResolver):
         """
         deadline = time.monotonic() + max(1, timeout)
         initial_token = turnstile_token(tab)
-        # 页面根本没有 Turnstile 组件也没有 token → 无需处理。
-        if not initial_token and not self._widget_present(tab):
+        # 组件可能异步加载（脚本来自 challenges.cloudflare.com）：
+        # 先轮询等待其出现，避免"导航瞬间未渲染→跳过→永不重试"。
+        present = self._widget_present(tab)
+        while not initial_token and not present and time.monotonic() < deadline and (deadline - time.monotonic()) > 4:
+            time.sleep(0.5)
+            present = self._widget_present(tab)
+        if not initial_token and not present:
             logger.debug("页面无内嵌 Turnstile 组件，跳过")
             return False
 
@@ -281,7 +286,15 @@ class CloudflareResolver(ChallengeResolver):
         return False
 
     def _widget_present(self, tab: ChromiumTab) -> bool:
-        try:
-            return bool(tab.ele("css:.cf-turnstile", timeout=1))  # type: ignore[union-attr]
-        except Exception:
-            return False
+        """组件存在判定：.cf-turnstile 容器 / turnstile 响应输入 / CF 挑战 iframe."""
+        for selector, wait in (
+            ("css:.cf-turnstile", 1),
+            ('css:input[name="cf-turnstile-response"]', 0.5),
+            ('css:iframe[src*="challenges.cloudflare.com"]', 0.5),
+        ):
+            try:
+                if tab.ele(selector, timeout=wait):  # type: ignore[union-attr]
+                    return True
+            except Exception:
+                continue
+        return False
