@@ -192,12 +192,18 @@ class CloudflareResolver(ChallengeResolver):
         """
         deadline = time.monotonic() + max(1, timeout)
         initial_token = turnstile_token(tab)
-        # 组件可能异步加载（脚本来自 challenges.cloudflare.com）：
-        # 先轮询等待其出现，避免"导航瞬间未渲染→跳过→永不重试"。
+        # 组件可能异步加载（脚本来自 challenges.cloudflare.com）：先给一个短宽限期
+        # 轮询等待其出现。宽限期必须远小于整体 timeout——绝大多数业务页没有内嵌
+        # Turnstile，若等到 deadline 才返回会把每次普通导航拖满整个超时（历史
+        # 上 example.com 也要 35s+）。
         present = self._widget_present(tab)
-        while not initial_token and not present and time.monotonic() < deadline and (deadline - time.monotonic()) > 4:
-            time.sleep(0.5)
-            present = self._widget_present(tab)
+        if not initial_token and not present:
+            appear_deadline = time.monotonic() + min(3.0, max(0.0, deadline - time.monotonic()))
+            while time.monotonic() < appear_deadline:
+                time.sleep(0.5)
+                if self._widget_present(tab):
+                    present = True
+                    break
         if not initial_token and not present:
             logger.debug("页面无内嵌 Turnstile 组件，跳过")
             return False

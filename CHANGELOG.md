@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.2] - 2026-09-10
+
+### 修复
+
+- **五秒盾误判致正常页面被判为挑战**：`FIVE_SECOND_SELECTORS` 的 `span[class*="second"]` 子串匹配命中 NexusPHP 种子页的 `torrent-type-badge--secondary`（audiences.me 单页 100 处），页面被误判为五秒盾，等满超时返回 `solved:false`，并因“已判定为挑战”跳过内嵌 Turnstile 分支。现改为整词匹配 `[class~="second"]` / `[class~="countdown"]`
+- **无内嵌 Turnstile 时白等整个挑战超时**：`solve_embedded_widget` 原在剩余预算 >4s 期间持续轮询等待组件出现，普通页面每次导航被拖满 timeout（`example.com` 实测 39.6s）。现组件出现等待最多 3s，页面无组件立即返回（实测 39.6s → 11.2s）
+
 ## [v3.4.1] - 2026-09-09
 
 ### 修复

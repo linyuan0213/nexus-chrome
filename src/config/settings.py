@@ -56,8 +56,10 @@ FIVE_SECOND_SELECTORS: List[str] = [
     ".loading-countdown",
     ".countdown-timer",
     "#wait-time",
-    'span[class*="second"]',
-    'div[class*="countdown"]',
+    # 精确类名标记（~= 为整词匹配）：禁用 *="second" 子串匹配，
+    # 否则 NexusPHP 种子页的 torrent-type-badge--secondary 会被误判为五秒盾。
+    '[class~="second"]',
+    '[class~="countdown"]',
 ]
 
 # 雷池

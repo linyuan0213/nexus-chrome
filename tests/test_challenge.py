@@ -17,6 +17,15 @@ EMBEDDED_TURNSTILE_PAGE = (
     "<input type='hidden' name='cf-turnstile-response'></div></body></html>"
 )
 FIVE_SEC_PAGE = "<html><head><title>安全检查中...</title></head><body><div id='sec'>5</div></body></html>"
+# NexusPHP 种子页：包含 torrent-type-badge--secondary（“second”只是子串），
+# 不是五秒盾，不得被 span[class*="second"] 误判。
+NEXUS_TORRENTS_PAGE = (
+    "<html><head><title>Audiences :: 种子 - Powered by NexusPHP</title></head><body>"
+    "<span class='torrent-type-badge torrent-type-badge--secondary'>免费</span>"
+    "<span class='torrent-type-badge torrent-type-badge--secondary'>2x</span>"
+    "<table class='torrents-table'><tr><td>种子</td></tr></table>"
+    "</body></html>"
+)
 LEICHI_PAGE = "<html><head><title>雷池</title></head><body><div id='safeline-block'></div></body></html>"
 NORMAL_PAGE = "<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"
 
@@ -88,6 +97,20 @@ class TestFiveSecondDetect:
         doc = PyQuery(NORMAL_PAGE)
         found = any(doc(s) for s in FIVE_SECOND_SELECTORS)
         assert found is False
+
+    def test_no_false_positive_on_secondary_badge(self):
+        """NexusPHP 种子页的 --secondary 类不得被误判为五秒盾。"""
+        from pyquery import PyQuery
+
+        from src.challenge.five_second_shield import FiveSecondShieldResolver
+        from src.config.settings import FIVE_SECOND_SELECTORS
+
+        doc = PyQuery(NEXUS_TORRENTS_PAGE)
+        assert not any(doc(s) for s in FIVE_SECOND_SELECTORS)
+
+        tab = MagicMock()
+        tab.html = NEXUS_TORRENTS_PAGE
+        assert FiveSecondShieldResolver().detect(tab) is False
 
     def test_challenge_type(self):
         from src.challenge.five_second_shield import FiveSecondShieldResolver

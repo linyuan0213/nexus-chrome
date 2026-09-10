@@ -153,6 +153,23 @@ class TestSolveEmbeddedWidget:
             result = CloudflareResolver().solve_embedded_widget(tab, timeout=2)
         assert result is False
 
+    def test_no_widget_bails_fast(self):
+        """页面无内嵌 Turnstile 时不应耗尽整个 timeout（否则每次普通导航都拖满）。"""
+        from src.challenge.cloudflare import CloudflareResolver
+
+        tab = MagicMock()
+
+        class _FakeResolver(CloudflareResolver):
+            def _widget_present(self, tab):  # noqa: ARG002
+                return False
+
+        start = time.monotonic()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.challenge.cloudflare.turnstile_token", lambda t: "")
+            result = _FakeResolver().solve_embedded_widget(tab, timeout=30)
+        assert result is False
+        assert time.monotonic() - start < 10, "无组件时应快速返回，而非等到 timeout"
+
 
 class TestCloudflareResolveOrder:
     def test_managed_challenge_when_no_locatable_box(self):
