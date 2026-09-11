@@ -212,8 +212,10 @@ def _read_version() -> str:
 
 
 APP_VERSION = os.getenv("APP_VERSION", _read_version())
-# 多指纹并发实例上限（每个指纹一个 Chrome 进程，约 0.5-1GB 内存/实例）
-MAX_BROWSERS = int(os.getenv("MAX_BROWSERS", "5"))
+# 浏览器实例上限（每个指纹一个 Chrome 进程，约 0.5-1GB 内存/实例）。
+# 默认 2：会话按 profile 复用实例，达到上限后复用现有实例而非超建，避免内存耗尽。
+# 需要更多指纹隔离时再用环境变量 MAX_BROWSERS 调大。
+MAX_BROWSERS = int(os.getenv("MAX_BROWSERS", "2"))
 PROFILE_DATA_DIR = os.getenv(
     "PROFILE_DATA_DIR", os.path.join(os.path.expanduser("~"), ".cache", "nexus-chrome", "profiles")
 )

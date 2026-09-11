@@ -114,28 +114,38 @@ class BrowserPool:
             key = f"{key}::{os.path.basename(chrome_path)}"
         with self._lock:
             inst = self._instances.get(key)
-            if inst is None:
-                self._evict_if_needed()
-                port = self._alloc_port()
-                display_index = self._alloc_display()
-                if key.startswith(DEFAULT_KEY):
-                    user_dir = os.path.join(USER_DATA_PATH, sanitize_key(key))
-                else:
-                    user_dir = os.path.join(PROFILE_DATA_DIR, sanitize_key(key))
-                inst = ChromeInstance(
-                    key=key,
-                    fp_env=fp_env,
-                    user_data_dir=user_dir,
-                    port=port,
-                    is_default=(key == DEFAULT_KEY),
-                    chrome_path=chrome_path,
-                    display_index=display_index,
-                )
-                self._instances[key] = inst
-                logger.info(
-                    f"[pool] 创建浏览器实例: {key} "
-                    f"(port={port}, display=:{display_index}, chrome={chrome_path or CHROME_PATH})"
-                )
+            if inst is not None:
+                return inst
+            self._evict_if_needed()
+            # 硬上限：达到上限且没有可回收的空闲实例时，复用现有实例而不是继续超建，
+            # 避免 Chrome 进程/内存膨胀拖垮主机；不同会话仍以 session/tab 隔离。
+            if self._max_browsers >= 1 and len(self._instances) >= self._max_browsers:
+                fallback = self._instances.get(DEFAULT_KEY) or next(iter(self._instances.values()), None)
+                if fallback is not None:
+                    logger.warning(
+                        f"[pool] 实例数已达上限 {self._max_browsers}，复用实例 {fallback.key} 承载 {key}（不新建）"
+                    )
+                    return fallback
+            port = self._alloc_port()
+            display_index = self._alloc_display()
+            if key.startswith(DEFAULT_KEY):
+                user_dir = os.path.join(USER_DATA_PATH, sanitize_key(key))
+            else:
+                user_dir = os.path.join(PROFILE_DATA_DIR, sanitize_key(key))
+            inst = ChromeInstance(
+                key=key,
+                fp_env=fp_env,
+                user_data_dir=user_dir,
+                port=port,
+                is_default=(key == DEFAULT_KEY),
+                chrome_path=chrome_path,
+                display_index=display_index,
+            )
+            self._instances[key] = inst
+            logger.info(
+                f"[pool] 创建浏览器实例: {key} "
+                f"(port={port}, display=:{display_index}, chrome={chrome_path or CHROME_PATH})"
+            )
             return inst
 
     # 真实 Google Chrome 路径（对 Google 等严格站点使用）
@@ -156,7 +166,7 @@ class BrowserPool:
         """
         key = profile_id or DEFAULT_KEY
         inst = self.get(key, fp_env)
-        return inst.ensure(), key
+        return inst.ensure(), inst.key
 
     def ensure_browser_with_env(self, fp_env: Optional[Dict[str, str]] = None) -> Chromium:
         """兼容旧接口：按 env 切换到默认实例（环境变化会复用/重建默认实例）。"""
