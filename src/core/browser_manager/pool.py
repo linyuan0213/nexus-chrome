@@ -117,15 +117,13 @@ class BrowserPool:
             if inst is not None:
                 return inst
             self._evict_if_needed()
-            # 硬上限：达到上限且没有可回收的空闲实例时，复用现有实例而不是继续超建，
-            # 避免 Chrome 进程/内存膨胀拖垮主机；不同会话仍以 session/tab 隔离。
+            # 不跨画像复用实例：把画像 A 的会话跑在画像 B 的实例上会造成指纹/UA
+            # 与 session 声明不一致，直接被 Cloudflare 拦截。达上限且无空闲实例时
+            # 临时新建（并发由后端信号量限制，空闲实例按 TTL 回收）。
             if self._max_browsers >= 1 and len(self._instances) >= self._max_browsers:
-                fallback = self._instances.get(DEFAULT_KEY) or next(iter(self._instances.values()), None)
-                if fallback is not None:
-                    logger.warning(
-                        f"[pool] 实例数已达上限 {self._max_browsers}，复用实例 {fallback.key} 承载 {key}（不新建）"
-                    )
-                    return fallback
+                logger.warning(
+                    f"[pool] 实例数已达上限 {self._max_browsers}，临时新建 {key}（不跨画像复用，避免指纹错配）"
+                )
             port = self._alloc_port()
             display_index = self._alloc_display()
             if key.startswith(DEFAULT_KEY):
@@ -194,9 +192,10 @@ class BrowserPool:
                 self._instances.pop(i.key, None)
                 i.shutdown()
             return
-        # 只回收空闲实例（无会话引用），避免关闭正在使用的浏览器
+        # 只回收空闲实例（无会话引用），避免关闭正在使用的浏览器；含 default，
+        # 以便为需要其它画像的会话腾出位置（不跨画像复用，保证指纹正确）。
         idle_candidates = sorted(
-            (i for i in self._instances.values() if not i.is_default and i.is_idle),
+            (i for i in self._instances.values() if i.is_idle),
             key=lambda i: i.last_used,
         )
         if idle_candidates:
