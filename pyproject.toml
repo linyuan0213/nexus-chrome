@@ -1,6 +1,6 @@
 [project]
 name = "nexus-chrome"
-version = "3.4.3"
+version = "3.4.4"
 description = "Nexus Chrome Service - Browser automation service for Nexus Media"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -72,6 +72,8 @@ known-first-party = ["src"]
 "tests/**" = ["TID", "PLC0415"]
 "tests/test_challenge.py" = ["E501"]
 "tests/test_challenge_resolve.py" = ["E501"]
+"tests/test_fp_ua.py" = ["E501"]
+"tests/test_session_service.py" = ["E501"]
 
 [tool.pyright]
 venvPath = "."

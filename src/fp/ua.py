@@ -67,3 +67,38 @@ def resolve_ua_fields(ua: str | None, ua_full: str | None = None, ua_brand: str 
         "ua_full": derive_full_version(ua, ua_full),
         "ua_brand": derive_brand_version(ua, ua_brand),
     }
+
+
+def ua_identity(ua: str | None) -> dict[str, str | None]:
+    """提取 UA 的「身份标识」：UA-CH 平台 + Chrome 主版本。
+
+    这两个字段决定画像指纹（补丁 Chromium 的 userAgentData / WebGL 渲染栈）是否
+    与 UA 自洽。无法识别时对应字段为 None。
+    """
+    if not ua:
+        return {"uad_platform": None, "chrome_major": None}
+    return {
+        "uad_platform": derive_platform(ua).get("uad_platform"),
+        "chrome_major": ua_major(ua),
+    }
+
+
+def profile_fits_ua(fp_env: dict[str, str] | None, ua: str | None) -> bool:
+    """画像 env 的「平台 + Chrome 主版本」是否与 UA 一致。
+
+    补丁 Chromium 的 `navigator.userAgentData.*` 与 WebGL 渲染栈由画像 env 决定
+    （CDP 只能改 `navigator.userAgent` / 旧版 `navigator.platform`），因此会话 UA
+    的平台/主版本必须与画像一致，否则会出现「UA 说 Windows、userAgentData 说
+    Linux、WebGL 泄漏 Mesa」的自相矛盾，被 Cloudflare Turnstile 直接拒绝。
+
+    UA 不含可识别字段时不做限制（返回 True）。缺失画像 env 视为无法判定（True），
+    由调用方决定是否按 UA 重新绑定画像。
+    """
+    if not fp_env or not ua:
+        return True
+    ident = ua_identity(ua)
+    if ident["uad_platform"] and fp_env.get("FP_UAD_PLATFORM") != ident["uad_platform"]:
+        return False
+    if ident["chrome_major"] and fp_env.get("FP_UA_BRAND") != ident["chrome_major"]:
+        return False
+    return True

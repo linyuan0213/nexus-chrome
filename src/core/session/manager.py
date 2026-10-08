@@ -113,6 +113,8 @@ class SessionManager:
         fp_profile_id: Optional[str] = None,
         fp_env: Optional[Dict[str, str]] = None,
         instance_key: Optional[str] = None,
+        requested_user_agent: Optional[str] = None,
+        requested_fp_profile_id: Optional[str] = None,
     ) -> Session:
         """创建会话。
 
@@ -135,6 +137,8 @@ class SessionManager:
             proxy=proxy,
             fp_profile_id=fp_profile_id,
             fp_env=fp_env,
+            requested_user_agent=requested_user_agent,
+            requested_fp_profile_id=requested_fp_profile_id,
         )
         session.instance_key = instance_key
         self._sessions[session_id] = session

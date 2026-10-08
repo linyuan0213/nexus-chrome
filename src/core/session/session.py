@@ -27,11 +27,16 @@ class Session(TabMixin):
         proxy: Optional[str] = None,
         fp_profile_id: Optional[str] = None,
         fp_env: Optional[Dict[str, str]] = None,
+        requested_user_agent: Optional[str] = None,
+        requested_fp_profile_id: Optional[str] = None,
     ):
         self.id = session_id
         self._browser = browser
         self.fingerprint = fingerprint
         self.fp_profile_id = fp_profile_id
+        # 请求时声明的身份（供调用方对比实际生效值，感知 UA/画像被校正）
+        self._requested_user_agent = requested_user_agent
+        self._requested_fp_profile_id = requested_fp_profile_id
         self._fp_env: Dict[str, str] = dict(fp_env) if fp_env else {}
         self.cookie_store = CookieStore()
         self._user_agent = user_agent
@@ -278,6 +283,15 @@ class Session(TabMixin):
             "id": self.id,
             "fingerprint": self.fingerprint.profile_name,
             "fp_profile_id": self.fp_profile_id,
+            # 实际生效的 UA（None 表示会话 UA 覆盖已被放弃，使用画像原生 UA）
+            "user_agent": self._user_agent,
+            "ua_override_applied": bool(self._user_agent),
+            # 请求时声明的身份，供调用方对比实际生效值
+            "requested_user_agent": self._requested_user_agent,
+            "requested_fp_profile_id": self._requested_fp_profile_id,
+            "profile_reconciled": bool(
+                self._requested_fp_profile_id and self._requested_fp_profile_id != self.fp_profile_id
+            ),
             "tabs": list(self._tabs.keys()),
             "active_tab": self._active_tab_name,
             "cookie_domains": self.cookie_store.list_domains(),

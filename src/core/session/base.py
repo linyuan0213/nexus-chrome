@@ -98,20 +98,33 @@ class SessionBase:
     # ---------- 指纹 / 网络层一致性原语 ----------
 
     def _apply_user_agent(self, tab: ChromiumTab) -> None:
-        """覆盖会话级 UA，并同步 Emulation platform。
+        """覆盖会话级 UA，并同步 Emulation platform + 完整 UA-CH metadata。
 
         仅改 UA 字符串会让 `navigator.platform` 保持实例原值（如 Linux），与
         Mac/Windows UA 自相矛盾，被 Cloudflare Turnstile 判为异常而拒绝渲染。
-        这里按 UA 派生 platform 一起覆盖（无识别结果时退回二进制原值）。
+        但 DrissionPage 的 `tab.set.user_agent(ua, platform=...)` 只发送
+        `Emulation.setUserAgentOverride` 的 userAgent/platform 两个字段，会
+        **清空** `_apply_ua_metadata` 已写入的 userAgentMetadata，导致
+        `navigator.userAgentData.brands=[]`、`userAgentData.platform=''`，
+        与自定义 UA 自相矛盾（Cloudflare 直接拒绝 Turnstile）。
+
+        这里改为携带完整 metadata 的 Emulation 覆盖，与 `_apply_ua_metadata`
+        的网络层覆盖保持一致，避免互相清空。
         """
         ua = self._user_agent
         if not ua:
             return
-        platform = derive_platform(ua).get("js_platform")
-        if platform:
+        user_agent, metadata, platform = self._build_ua_override()
+        try:
+            tab.run_cdp(  # type: ignore[union-attr]
+                "Emulation.setUserAgentOverride",
+                userAgent=user_agent,
+                platform=platform,
+                userAgentMetadata=metadata,
+            )
+        except Exception as e:
+            logger.debug(f"[Session:{self.id}] Emulation UA 覆盖失败，回退 tab.set.user_agent: {e}")
             tab.set.user_agent(ua, platform=platform)  # type: ignore[union-attr]
-        else:
-            tab.set.user_agent(ua)  # type: ignore[union-attr]
 
     def _apply_init_js(self, tab: ChromiumTab) -> None:
         """在导航前注入 Turnstile 组件修复，提升挑战通过率。
@@ -172,53 +185,65 @@ class SessionBase:
             "uad_model": env.get("FP_UAD_MODEL", base["uad_model"]),
         }
 
-    def _apply_ua_metadata(self, tab: ChromiumTab) -> None:
-        """用 CDP 覆盖网络层 UA 请求头（User-Agent + Sec-CH-UA），与 JS 指纹一致。
+    def _build_ua_override(self) -> tuple[str, Dict[str, Any], str]:
+        """构造自洽的 UA 覆盖三元组 (userAgent, userAgentMetadata, platform)。
 
-        fp_config 只 patch Blink 层（JS 可见的 userAgentData），HTTP 请求头仍是
-        真实版本（如 153），导致"JS 说 151、请求头说 153"的不一致被 Cloudflare 判自动化。
-        此方法按画像动态设置 Network.setUserAgentOverride，使请求头与指纹一致。
+        - userAgent：会话级 UA 优先，否则取画像/兜底 UA；
+        - platform：JS `navigator.platform`（如 Win32 / MacIntel / Linux x86_64）；
+        - userAgentMetadata：UA-CH（brands/fullVersionList/platform/platformVersion/
+          architecture/model）。
 
-        注意：补丁 chrome 的 CDP schema 将 architecture/bitness 等字段设为必填，
-        缺失会导致 setUserAgentOverride 被拒（覆盖静默失败、请求头发原生 153）。
-        必须提供完整字段；完整 metadata 同时会替换原生 client-hint 策略，
-        从而抑制原生 high-entropy 头（sec-ch-ua-full-version/arch 等）泄漏。
+        补丁 chrome 的 CDP schema 将 architecture/bitness 等字段设为必填，缺失会
+        导致 setUserAgentOverride 被拒（覆盖静默失败、请求头发原生版本）。必须提供
+        完整字段；完整 metadata 同时会替换原生 client-hint 策略，抑制原生
+        high-entropy 头（sec-ch-ua-full-version/arch 等）泄漏。
         """
         v = self._resolve_ua_values()
         brand = v["ua_brand"]
         full = v["ua_full"]
         grease = "99"
         grease_full = "99.0.0.0"
+        # brands/fullVersionList 必须与 fp_config 的 UaBrands 完全一致
+        # （品牌名与顺序：Not_A Brand, Google Chrome, Chromium），否则请求头与
+        # JS userAgentData 不一致会被严格 Turnstile 判定。
+        metadata: Dict[str, Any] = {
+            "brands": [
+                {"brand": "Not=A?Brand", "version": grease},
+                {"brand": "Google Chrome", "version": brand},
+                {"brand": "Chromium", "version": brand},
+            ],
+            "fullVersionList": [
+                {"brand": "Not=A?Brand", "version": grease_full},
+                {"brand": "Google Chrome", "version": full},
+                {"brand": "Chromium", "version": full},
+            ],
+            "fullVersion": full,
+            "platform": v["uad_platform"],
+            # platformVersion/architecture/model 必须逐字段取自画像 env，
+            # 与 fp_config（FP_UAD_PLATFORM_VERSION/FP_UAD_ARCH/FP_UAD_MODEL）
+            # 完全一致；硬编码空值/x86_64 会让 Sec-CH-UA-Platform-Version 等
+            # 头缺失或与 JS userAgentData 矛盾（Windows 画像会被 CF 判异常）。
+            "platformVersion": v["uad_platform_version"],
+            "architecture": v["uad_arch"],
+            "model": v["uad_model"],
+            "mobile": False,
+            "bitness": "64",
+        }
+        return v["ua"], metadata, v["platform"]
+
+    def _apply_ua_metadata(self, tab: ChromiumTab) -> None:
+        """用 CDP 覆盖网络层 UA 请求头（User-Agent + Sec-CH-UA），与 JS 指纹一致。
+
+        fp_config 只 patch Blink 层（JS 可见的 userAgentData），HTTP 请求头仍是
+        真实版本（如 153），导致"JS 说 151、请求头说 153"的不一致被 Cloudflare 判自动化。
+        此方法按画像动态设置 Network.setUserAgentOverride，使请求头与指纹一致。
+        """
+        user_agent, metadata, _platform = self._build_ua_override()
         try:
-            # brands/fullVersionList 必须与 fp_config 的 UaBrands 完全一致
-            # （品牌名与顺序：Google Chrome, Chromium, Not_A Brand），
-            # 否则请求头与 JS userAgentData 不一致会被严格 Turnstile 判定。
             tab.run_cdp(  # type: ignore[union-attr]
                 "Network.setUserAgentOverride",
-                userAgent=v["ua"],
-                userAgentMetadata={
-                    "brands": [
-                        {"brand": "Not=A?Brand", "version": grease},
-                        {"brand": "Google Chrome", "version": brand},
-                        {"brand": "Chromium", "version": brand},
-                    ],
-                    "fullVersionList": [
-                        {"brand": "Not=A?Brand", "version": grease_full},
-                        {"brand": "Google Chrome", "version": full},
-                        {"brand": "Chromium", "version": full},
-                    ],
-                    "fullVersion": full,
-                    "platform": v["uad_platform"],
-                    # platformVersion/architecture/model 必须逐字段取自画像 env，
-                    # 与 fp_config（FP_UAD_PLATFORM_VERSION/FP_UAD_ARCH/FP_UAD_MODEL）
-                    # 完全一致；硬编码空值/x86_64 会让 Sec-CH-UA-Platform-Version 等
-                    # 头缺失或与 JS userAgentData 矛盾（Windows 画像会被 CF 判异常）。
-                    "platformVersion": v["uad_platform_version"],
-                    "architecture": v["uad_arch"],
-                    "model": v["uad_model"],
-                    "mobile": False,
-                    "bitness": "64",
-                },
+                userAgent=user_agent,
+                userAgentMetadata=metadata,
             )
         except Exception as e:
             logger.debug(f"[Session:{self.id}] 设置网络层 UA 覆盖失败: {e}")

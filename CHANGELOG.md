@@ -2,6 +2,19 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.4] - 2026-10-08
+
+### 修复
+
+- **实例达上限时跨画像复用致指纹错配**：`ensure_browser_with_profile` 在实例数达 `MAX_BROWSERS` 时可能把请求 A 画像的会话跑在 B 画像实例上，导致 UA/指纹与 session 声明不一致被 Cloudflare 拦截。现达上限优先回收空闲实例（含 default）腾位、不跨画像复用，无空闲则临时新建；`ensure_browser_with_profile` 返回实际实例 key 保证引用计数正确，`MAX_BROWSERS` 默认 5 → 2（`src/core/browser_manager/pool.py`）
+- **会话级 `user_agent` 与指纹画像身份冲突致 Cloudflare 过盾失败**：补丁 Chromium 的 `navigator.userAgentData.*`（brands/platform/platformVersion）与 WebGL 渲染栈由画像 env 决定，CDP 只能改 `navigator.userAgent` / 旧版 `navigator.platform`。当会话声明的 UA 平台/主版本与绑定画像（或默认画像）不一致时，会出现「UA 说 Windows、`userAgentData.platform` 说 Linux、WebGL 泄漏 Mesa」的自相矛盾，Cloudflare Turnstile 直接拒绝、一直卡在 5 秒盾。现创建会话时校验 UA 与画像的「平台 + Chrome 主版本」：
+  - 一致 → 原样使用；
+  - 冲突且存在匹配画像 → 自动绑定匹配画像（`navigator.userAgentData`/WebGL 与 UA 自洽）；
+  - 冲突且无匹配画像 → 忽略 UA 覆盖、保留画像原生 UA，并记录 warning。
+  （`src/fp/ua.py` 新增 `ua_identity` / `profile_fits_ua`，`src/services/session_service.py` 新增 `_reconcile_ua_profile` / `_choose_profile_for_ua`）
+- **会话级 UA 覆盖清空 UA-CH metadata**：`_apply_user_agent` 原调 `tab.set.user_agent()` 仅发送 `Emulation.setUserAgentOverride` 的 `userAgent/platform`，会清空 `_apply_ua_metadata` 写入的 `userAgentMetadata`，导致 `navigator.userAgentData.brands=[]`、`platform=''`。现改为携带完整 metadata 的 `Emulation` 覆盖（`src/core/session/base.py` 新增 `_build_ua_override` 统一复用）。
+- **会话创建响应暴露实际生效的身份**：`Session.to_dict()` 新增 `user_agent`（生效值，None 表示覆盖被放弃）、`ua_override_applied`、`requested_user_agent`、`requested_fp_profile_id`、`profile_reconciled`，供调用方感知 UA 被放弃或画像被自动切换（不再静默改变身份）。
+
 ## [v3.4.3] - 2026-09-10
 
 ### 修复

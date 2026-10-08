@@ -58,6 +58,49 @@ class TestSessionManager:
             sm.get("a")
 
 
+class TestToDictEffectiveIdentity:
+    """to_dict 暴露实际生效的 UA/画像，供调用方感知被校正的身份。"""
+
+    def test_no_override(self, mock_browser):
+        d = Session("s1", mock_browser, FingerprintManager("stealth")).to_dict()
+        assert d["user_agent"] is None
+        assert d["ua_override_applied"] is False
+        assert d["profile_reconciled"] is False
+
+    def test_effective_override_and_profile_swap_visible(self, mock_browser):
+        s = Session(
+            "s1",
+            mock_browser,
+            FingerprintManager("stealth"),
+            user_agent="UA-effective",
+            fp_profile_id="user_windows",
+            requested_user_agent="UA-requested",
+            requested_fp_profile_id="user_1",
+        )
+        d = s.to_dict()
+        assert d["user_agent"] == "UA-effective"
+        assert d["ua_override_applied"] is True
+        assert d["requested_user_agent"] == "UA-requested"
+        assert d["requested_fp_profile_id"] == "user_1"
+        assert d["profile_reconciled"] is True
+
+    def test_dropped_override_visible(self, mock_browser):
+        s = Session(
+            "s1",
+            mock_browser,
+            FingerprintManager("stealth"),
+            user_agent=None,
+            fp_profile_id="user_windows",
+            requested_user_agent="UA-requested",
+            requested_fp_profile_id="user_windows",
+        )
+        d = s.to_dict()
+        assert d["user_agent"] is None
+        assert d["ua_override_applied"] is False
+        assert d["requested_user_agent"] == "UA-requested"
+        assert d["profile_reconciled"] is False
+
+
 class TestSessionNavigate:
     def test_navigate_creates_tab_and_stores_cookies(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
