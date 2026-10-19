@@ -205,6 +205,10 @@ def _find_turnstile_checkbox(box: Any) -> Any:
         "css:div[role=checkbox]",
         'css:[data-role="checkbox"]',
         "css:div.ctp-checkbox",
+        "css:label",
+        "css:div.cb-lb",
+        "css:div[aria-checked]",
+        "css:input",
     ):
         try:
             el = box.ele(selector, timeout=2)  # type: ignore[union-attr]
@@ -215,77 +219,91 @@ def _find_turnstile_checkbox(box: Any) -> Any:
     return None
 
 
+def _wait_turnstile_result(
+    page: ChromiumTab,
+    box: Any,
+    token_before: str,
+) -> bool:
+    deadline = time.monotonic() + _CLICK_JUDGE_TIMEOUT_S
+    while time.monotonic() < deadline:
+        try:
+            if _turnstile_success(box):
+                return True
+        except Exception as e:
+            logger.debug(f"turnstile_click: success 判定失败（盒子可能已重渲染）: {e}")
+        try:
+            token_now = turnstile_token(page)
+            if token_now and token_now != token_before:
+                return True
+        except Exception as e:
+            logger.debug(f"turnstile_click: token 读取失败: {e}")
+        if not page_title_is_challenge(page):
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def turnstile_click(page: ChromiumTab, target_box: TurnstileBox, max_attempts: int = 3) -> bool:
     """人性化点击 Turnstile 复选框（shadow root 内），最多重试 max_attempts 次。
 
     新版 Turnstile 的可点击元素通常是 ``input[type=checkbox]``
     （aria-label 如“请验证您是真人”），老版本则是 ``div[role=checkbox]``。
-    只接受复选框类元素，避免 shadow root 为空时泄漏到页面元素导致误点。
+    部分新版本把复选框放进 closed shadow root，DOM 无法读取，此时按
+    iframe 左上角坐标点击复选框区域兜底。
 
     点击采用人性化贝塞尔轨迹（移动 + 按下/释放），对抗 CF 的鼠标行为检测。
-    坐标 = iframe 绝对偏移 + 复选框 iframe 内相对中心 + 微小随机偏移；
-    坐标不可用时回退元素级 CDP 点击（btn.click 自带 iframe 偏移）。
     每次点击后等待判定（success 标记或 token），未通过则重试。
     """
     box = target_box.box
     origin = target_box.origin
     for attempt in range(1, max_attempts + 1):
         btn = _find_turnstile_checkbox(box)
-        if not btn:
-            # 组件可能尚未渲染出复选框，稍等重试
-            logger.debug(f"turnstile_click: 第 {attempt} 次未找到复选框")
+        token_before = turnstile_token(page)
+        clicked = False
+
+        if btn:
+            target = _checkbox_viewport_center(btn, origin)
+            if target is not None:
+                try:
+                    logger.debug(f"turnstile_click: 人性化点击 ({target[0]}, {target[1]})")
+                    human_click(page, target)
+                    clicked = True
+                except Exception as e:
+                    logger.debug(f"turnstile_click: 人性化点击失败({e})，回退元素点击")
+            if not clicked:
+                try:
+                    btn.click()  # type: ignore[union-attr]
+                    clicked = True
+                except Exception as e:
+                    logger.debug(f"turnstile_click: btn.click 失败({e})，回退 actions")
+                    try:
+                        page.actions.move_to(btn, duration=0.8)  # type: ignore[union-attr]
+                        page.actions.click(btn)  # type: ignore[union-attr]
+                        clicked = True
+                    except Exception as e2:
+                        logger.debug(f"turnstile_click: actions 点击也失败: {e2}")
+        elif origin is not None:
+            # closed shadow root 兜底：复选框固定在 iframe 左上角约 (30, 32)
+            target = (
+                origin[0] + 30 + random.randint(-2, 2),
+                origin[1] + 32 + random.randint(-2, 2),
+            )
+            try:
+                logger.debug(f"turnstile_click: 未找到复选框，按 iframe 坐标兜底 ({target[0]}, {target[1]})")
+                human_click(page, target)
+                clicked = True
+            except Exception as e:
+                logger.debug(f"turnstile_click: 坐标兜底点击失败: {e}")
+
+        if not clicked:
+            logger.debug(f"turnstile_click: 第 {attempt} 次未能点击复选框")
             if attempt < max_attempts:
                 time.sleep(1.5)
                 continue
             return False
 
-        # 记录点击前 token：成功后只认“点击后新生成”的 token，
-        # 避免把页面残留的旧/过期 token 误判为本次通过
-        token_before = turnstile_token(page)
-        target = _checkbox_viewport_center(btn, origin)
-        clicked = False
-        if target is not None:
-            try:
-                logger.debug(f"turnstile_click: 人性化点击 ({target[0]}, {target[1]})")
-                human_click(page, target)
-                clicked = True
-            except Exception as e:
-                logger.debug(f"turnstile_click: 人性化点击失败({e})，回退元素点击")
-        if not clicked:
-            try:
-                btn.click()  # type: ignore[union-attr]
-                clicked = True
-            except Exception as e:
-                logger.debug(f"turnstile_click: btn.click 失败({e})，回退 actions")
-                try:
-                    page.actions.move_to(btn, duration=0.8)  # type: ignore[union-attr]
-                    page.actions.click(btn)  # type: ignore[union-attr]
-                    clicked = True
-                except Exception as e2:
-                    logger.debug(f"turnstile_click: actions 点击也失败: {e2}")
-        if not clicked:
-            continue
-
-        # 等待本次点击的判定结果（成功标记出现或拿到“点击后新”token 或页面已脱离挑战）。
-        # 一旦判定成功立即返回——禁止后续重试点击，避免低配设备上因判定慢一拍
-        # 导致“成功后再次点击/重置”，引发 token 重复提交（变勾后报错）。
-        deadline = time.monotonic() + _CLICK_JUDGE_TIMEOUT_S
-        while time.monotonic() < deadline:
-            try:
-                if _turnstile_success(box):
-                    return True
-            except Exception as e:
-                logger.debug(f"turnstile_click: success 判定失败（盒子可能已重渲染）: {e}")
-            try:
-                token_now = turnstile_token(page)
-                if token_now and token_now != token_before:
-                    return True
-            except Exception as e:
-                logger.debug(f"turnstile_click: token 读取失败: {e}")
-            # 快退：标题已脱离挑战（CF 走 JS 自动通过时点击可能不产生 success 标记）
-            if not page_title_is_challenge(page):
-                return True
-            time.sleep(0.5)
+        if _wait_turnstile_result(page, box, token_before):
+            return True
         logger.debug(f"turnstile_click: 第 {attempt} 次点击未通过判定")
     return False
 

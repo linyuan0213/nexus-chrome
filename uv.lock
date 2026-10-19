@@ -850,7 +850,7 @@ wheels = [
 
 [[package]]
 name = "nexus-chrome"
-version = "3.4.4"
+version = "3.4.5"
 source = { virtual = "." }
 dependencies = [
     { name = "drissionpage" },
@@ -876,7 +876,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "drissionpage", specifier = ">=4.2.0b14" },
+    { name = "drissionpage", specifier = ">=5.0.0b1" },
     { name = "fake-useragent", specifier = ">=2.2.0" },
     { name = "fastapi", specifier = ">=0.122.0" },
     { name = "httpx2", specifier = ">=2.9.1" },
