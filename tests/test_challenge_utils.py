@@ -156,6 +156,16 @@ class TestTurnstileClick:
         assert turnstile_click(self._Page(), TurnstileBox(box=box, origin=None), max_attempts=3) is False  # type: ignore[arg-type]
         assert clicked == [True, True, True]
 
+    def test_closed_shadow_root_falls_back_to_iframe_coordinate(self, monkeypatch):
+        """复选框不可见（closed shadow root）时，按 iframe 左上角坐标兜底点击。"""
+        self._patch_judgement(monkeypatch, success=True)
+        calls = []
+        monkeypatch.setattr("src.utils.challenge_utils.human_click", lambda page, target: calls.append(target))
+        box = self._Box(btn=None)
+        assert turnstile_click(self._Page(), TurnstileBox(box=box, origin=(100, 200))) is True  # type: ignore[arg-type]
+        assert len(calls) == 1
+        assert abs(calls[0][0] - 130) <= 2 and abs(calls[0][1] - 232) <= 2
+
     def test_no_checkbox_returns_false_after_retries(self, monkeypatch):
         """始终无复选框：重试 3 次后返回 False。"""
         sleeps = []
