@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.5] - 2026-10-19
+
+### 修复
+
+- **新版 Turnstile 复选框无法定位**：部分站点（观众、我堡）Turnstile 复选框位于 closed shadow root，`input[type=checkbox]` 等选择器全部未命中，导致一直等待验证超时。现补充 `label` / `.cb-lb` / `aria-checked` 等选择器，并在完全找不到元素时按 iframe 左上角 `(30, 32)` 坐标点击兜底；点击后继续用 success/token 判定。
+- **DrissionPage 依赖升级**：最低版本提升到 `5.0.0b1`，同步 `uv.lock`。
+
 ## [v3.4.4] - 2026-10-08
 
 ### 修复
