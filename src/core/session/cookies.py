@@ -1,6 +1,6 @@
 """Cookie 操作 mixin — CookieStore 读写与 Cookie 头解析/合并。"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from loguru import logger
 
@@ -26,15 +26,27 @@ class CookieMixin(SessionBase):
 
     def _sync_page_cookies(self, tab: Any, domain: str) -> None:
         """从页面同步 Cookie 到 CookieStore（tab.cookies 失败时回退 CDP Storage.getCookies）。"""
+        page_host = str(domain or "").split(":")[0].lstrip(".").lower()
+        if not page_host:
+            return
+
+        def _same_site(cookie: Any) -> bool:
+            data = cast(Dict[str, Any], cookie) if isinstance(cookie, dict) else {}
+            cookie_domain = str(data.get("domain") or page_host).lstrip(".").lower()
+            return bool(cookie_domain) and (page_host == cookie_domain or page_host.endswith("." + cookie_domain))
+
         try:
             cookies = tab.cookies()
             if cookies:
-                self._store_cookies(domain, cookies)
+                # tab.cookies() 返回浏览器级全部 Cookie，必须按当前页面域名过滤，
+                # 否则搜索站/统计站的大 Cookie 会被错误归到当前站点并撑爆请求头。
+                self._store_cookies(domain, [c for c in cookies if _same_site(c)])
         except Exception:
             try:
                 browser_any: Any = self._browser
                 result = browser_any._run_cdp("Storage.getCookies")
-                self._store_cookies(domain, result.get("cookies", []))
+                cookies = result.get("cookies", [])
+                self._store_cookies(domain, [c for c in cookies if _same_site(c)])
             except Exception:
                 logger.debug(f"[Session:{self.id}] CDP 获取 Cookies 失败，跳过")
 
