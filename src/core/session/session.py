@@ -80,6 +80,7 @@ class Session(TabMixin):
                     c.setdefault("path", "/")
                 cookies = stored
             if cookies:
+                cookies = self.limit_cookie_header(cookies)
                 for c in cookies:
                     c.setdefault("domain", domain)
                     c.setdefault("path", "/")
@@ -96,7 +97,9 @@ class Session(TabMixin):
                     logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
 
             tab.get(url)  # type: ignore[union-attr]
-            tab.wait(3)
+            # load_mode=none 下不阻塞页面加载；挑战编排器会继续轮询。
+            # 原 3 秒固定等待会在每个榜单页面白等 3 秒。
+            tab.wait(1)
         except Exception:
             # 导航/初始化失败：关闭已创建的标签页，避免孤儿页面残留
             try:

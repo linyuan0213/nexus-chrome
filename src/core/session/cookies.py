@@ -6,9 +6,46 @@ from loguru import logger
 
 from src.core.session.base import SessionBase
 
+_HEADER_COOKIE_LIMIT = 4096
+_ESSENTIAL_COOKIE_NAMES = {
+    "PHPSESSID",
+    "adult",
+    "age_verified",
+    "cf_clearance",
+    "over18",
+    "temp_id",
+    "__cf_bm",
+    "__cfduid",
+}
+
 
 class CookieMixin(SessionBase):
     """会话 Cookie 存取（双向同步 CookieStore）。"""
+
+    def limit_cookie_header(
+        self,
+        cookies: List[Dict[str, str]],
+        max_bytes: int = _HEADER_COOKIE_LIMIT,
+    ) -> List[Dict[str, str]]:
+        """裁剪过大的 Cookie 头，优先保留过盾/会话必需的 Cookie."""
+
+        def _size(items: List[Dict[str, str]]) -> int:
+            return sum(len(str(item.get("name") or "")) + len(str(item.get("value") or "")) + 2 for item in items)
+
+        if not cookies or _size(cookies) <= max_bytes:
+            return cookies
+        essential = [item for item in cookies if str(item.get("name") or "") in _ESSENTIAL_COOKIE_NAMES]
+        selected = list(essential)
+        for item in cookies:
+            if item in essential:
+                continue
+            if _size(selected + [item]) <= max_bytes:
+                selected.append(item)
+        logger.warning(
+            f"[Session:{self.id}] Cookie 头超限，已裁剪 "
+            f"{len(cookies)} -> {len(selected)} 个，{_size(cookies)} -> {_size(selected)} 字节"
+        )
+        return selected
 
     def _store_cookies(self, domain: str, cookies: List[Dict[str, str]]) -> None:
         for c in cookies:
