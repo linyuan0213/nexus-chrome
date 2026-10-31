@@ -5,6 +5,7 @@
 """
 
 import time
+from threading import RLock
 from typing import Any, Dict, Optional
 
 from DrissionPage import Chromium
@@ -35,6 +36,12 @@ class SessionBase:
     _active_tab_name: Optional[str]
     _tab_counter: int
     _last_used_at: float
+    _lock: Any
+    _tab_locks: Dict[str, Any]
+    _challenge_locks: Dict[str, Any]
+    _challenge_generations: Dict[str, int]
+    _challenge_failed: set[str]
+    _closed: bool
 
     @property
     def last_used_at(self) -> float:
@@ -45,6 +52,88 @@ class SessionBase:
         self._last_used_at = time.monotonic()
 
     # ---------- 标签页原语 ----------
+
+    def _tab_lock_for(self, tab_name: str) -> Any:
+        """返回某个 tab 的独立锁；session 锁只保护注册表读取/创建."""
+        with self._lock:
+            lock = self._tab_locks.get(tab_name)
+            if lock is None:
+                lock = RLock()
+                self._tab_locks[tab_name] = lock
+            return lock
+
+    def _has_clearance(self, domain: str) -> bool:
+        """当前 session 是否已有该域名的有效过盾 Cookie；失败域视为无效."""
+        with self._lock:
+            if domain in self._challenge_failed:
+                return False
+        return any(str(c.get("name") or "") == "cf_clearance" for c in self.cookie_store.get(domain))
+
+    def _mark_challenge_failed(self, domain: str) -> None:
+        with self._lock:
+            self._challenge_failed.add(domain)
+
+    def _mark_challenge_solved(self, domain: str) -> None:
+        with self._lock:
+            self._challenge_failed.discard(domain)
+
+    def _clear_clearance_cookies(self, tab: ChromiumTab, domain: str) -> None:
+        """挑战失败后清除失效的 cf_clearance/cf_chl_*，让下一次重新过盾."""
+        names = ("cf_clearance", "cf_chl_rc_ni", "cf_chl_prog", "cf_chl_2")
+        for name in names:
+            for cookie_domain in (domain, f".{domain}"):
+                try:
+                    tab.run_cdp(  # type: ignore[union-attr]
+                        "Network.deleteCookies",
+                        name=name,
+                        domain=cookie_domain,
+                        path="/",
+                    )
+                except Exception:
+                    continue
+
+    def _challenge_gate(self, domain: str) -> tuple[Any, int]:
+        """按 session+domain 串行过盾；返回锁和当前代次."""
+        with self._lock:
+            lock = self._challenge_locks.get(domain)
+            if lock is None:
+                lock = RLock()
+                self._challenge_locks[domain] = lock
+            return lock, self._challenge_generations.get(domain, 0)
+
+    def _bump_challenge_generation(self, domain: str) -> None:
+        with self._lock:
+            self._challenge_generations[domain] = self._challenge_generations.get(domain, 0) + 1
+
+    def _lookup_tab(self, tab_name: Optional[str] = None) -> tuple[str, ChromiumTab]:
+        """在 session 注册表锁内定位 tab，返回名称和句柄，不持有锁."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError(f"[Session:{self.id}] 会话已关闭")
+            name = tab_name or self._active_tab_name
+            if not name:
+                raise ValueError("没有活跃的标签页，请先调用 navigate")
+            tab = self._tabs.get(name)
+            if tab is None:
+                raise ValueError(f"标签页 '{name}' 未找到")
+            return name, tab
+
+    def _create_tab_handle(self, tab_name: Optional[str] = None) -> tuple[str, ChromiumTab]:
+        """由 Session 实现：创建并注册空 tab，不执行导航."""
+        raise NotImplementedError
+
+    def _load_tab(
+        self,
+        tab: ChromiumTab,
+        url: str,
+        *,
+        cookie: Optional[str] = None,
+        referer: Optional[str] = None,
+        timeout: int = 30,
+        local_storage: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """由 Session 实现：在调用方持有的 tab 锁内导航并返回快照."""
+        raise NotImplementedError
 
     def _auto_tab_name(self) -> str:
         self._tab_counter += 1
@@ -63,37 +152,74 @@ class SessionBase:
             return self._proxy_context.new_tab()  # type: ignore[union-attr]
         return self._browser.new_tab()  # type: ignore[union-attr]
 
-    def _get_active_tab(self) -> ChromiumTab:
-        if self._active_tab_name and self._active_tab_name in self._tabs:
-            return self._tabs[self._active_tab_name]
-        # 无活跃标签页时自动创建一个（about:blank）：截图/交互等操作无需先 navigate。
-        # 典型场景：新建会话后直接用 VNC 导航，或直接点截图。
+    def _active_tab_or_none(self) -> Optional[ChromiumTab]:
+        """返回活动标签页；无活动页时返回 None，绝不隐式创建页面。"""
+        name = self._active_tab_name
+        if not name:
+            return None
+        tab = self._tabs.get(name)
+        if tab is None:
+            self._active_tab_name = next(reversed(self._tabs), None)
+            return None
         try:
-            return self._create_tab_internal("about:blank")  # type: ignore[attr-defined, reportUnknownMemberType, reportUnknownVariableType]
-        except Exception as e:
-            logger.warning(f"[Session:{self.id}] 自动创建标签页失败: {e}")
-            raise ValueError("没有活跃的标签页，请先调用 navigate") from e
+            _ = tab.url
+        except Exception:
+            # 浏览器进程重启或目标页已崩溃：移除失效句柄，避免后续读取空指针。
+            logger.warning(f"[Session:{self.id}] 活动标签页 {name} 已失效，移除句柄")
+            self._tabs.pop(name, None)
+            self._active_tab_name = next(reversed(self._tabs), None)
+            return None
+        return tab
 
-    def close_tab(self, tab_name: str) -> None:
-        if tab_name not in self._tabs:
-            raise ValueError(f"标签页 '{tab_name}' 未找到")
-        tab = self._tabs.pop(tab_name)
-        if self._active_tab_name == tab_name:
-            self._active_tab_name = next(iter(self._tabs), None)
+    def _get_active_tab(self) -> ChromiumTab:
+        tab = self._active_tab_or_none()
+        if tab is None:
+            raise ValueError("没有活跃的标签页，请先调用 navigate")
+        return tab
+
+    def _close_tab_handle(self, name: str, tab: ChromiumTab) -> None:
+        """关闭标签页；常规关闭失败时用 CDP 兜底，两者都失败才抛错."""
         try:
             tab.close()
+            return
         except Exception:
-            logger.warning(f"[Session:{self.id}] 常规关闭标签页 {tab_name} 失败，尝试 CDP 关闭")
-            try:
-                target_id = getattr(tab, "tab_id", None) or tab._target_id
-                browser_any: Any = self._browser
-                browser_any._run_cdp("Target.CloseTarget", {"targetId": target_id})
-            except Exception:
-                logger.warning(f"[Session:{self.id}] CDP 关闭标签页 {tab_name} 也失败，标签页可能已孤儿")
+            logger.warning(f"[Session:{self.id}] 常规关闭标签页 {name} 失败，尝试 CDP 关闭")
+        try:
+            target_id = getattr(tab, "tab_id", None) or tab._target_id
+            browser_any: Any = self._browser
+            browser_any._run_cdp("Target.CloseTarget", {"targetId": target_id})
+        except Exception as e:
+            raise RuntimeError(f"标签页 {name} 关闭失败: {e}") from e
+
+    def close_tab(self, tab_name: str) -> None:
+        with self._lock:
+            tab = self._tabs.get(tab_name)
+            if tab is None:
+                raise ValueError(f"标签页 '{tab_name}' 未找到")
+        tab_lock = self._tab_lock_for(tab_name)
+        with tab_lock:
+            with self._lock:
+                if self._tabs.get(tab_name) is not tab:
+                    raise ValueError(f"标签页 '{tab_name}' 未找到")
+            # 成功关闭后才移除句柄；失败时保留，调用方可重试或由 session 清理。
+            self._close_tab_handle(tab_name, tab)
+            with self._lock:
+                if self._tabs.get(tab_name) is tab:
+                    self._tabs.pop(tab_name, None)
+                    self._tab_locks.pop(tab_name, None)
+                    if self._active_tab_name == tab_name:
+                        self._active_tab_name = next(reversed(self._tabs), None)
 
     def close_all_tabs(self) -> None:
-        for name in list(self._tabs.keys()):
-            self.close_tab(name)
+        # 不能持有 session 锁等待 tab 锁：导航线程可能持有 tab 锁后需要
+        # 更新 active/注册表，会形成 ABBA 死锁。
+        with self._lock:
+            names = list(self._tabs.keys())
+        for name in names:
+            try:
+                self.close_tab(name)
+            except Exception as e:
+                logger.warning(f"[Session:{self.id}] 关闭标签页 {name} 失败: {e}")
 
     # ---------- 指纹 / 网络层一致性原语 ----------
 

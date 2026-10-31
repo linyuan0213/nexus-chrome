@@ -50,14 +50,27 @@ class FetchMixin(CookieMixin):
 
         直接复用 navigate 的过盾能力，取回页面 HTML 作为原始响应体。
         """
-        nav_result = cast("Session", self).navigate(url, cookie=cookie, timeout=timeout)
-        return {
-            "url": nav_result.get("url", url),
-            "status_code": 200,
-            "headers": {},
-            "body": nav_result.get("html", ""),
-            "challenge": nav_result.get("challenge"),
-        }
+        name = self._auto_tab_name()
+        try:
+            nav_result = cast("Session", self).navigate(
+                url,
+                tab_name=name,
+                cookie=cookie,
+                timeout=timeout,
+            )
+            return {
+                "url": nav_result.get("url", url),
+                "status_code": 200,
+                "headers": {},
+                "body": nav_result.get("html", ""),
+                "challenge": nav_result.get("challenge"),
+            }
+        finally:
+            # fetch 的临时页不保留，Cookie 属于 session，关闭 tab 不影响复用。
+            try:
+                self.close_tab(name)
+            except Exception:
+                logger.debug(f"[Session:{self.id}] 清理 fetch 临时标签页失败")
 
     def _browser_fetch_js(
         self,
@@ -72,17 +85,17 @@ class FetchMixin(CookieMixin):
         self.touch()
         domain = urlparse(url).netloc
         cookies = self._merge_cookies(domain, cookie)
-        tab = self._create_fetch_tab(url, cookies=cookies)
-        name = self._auto_tab_name()
-        self._tabs[name] = tab
-        self._active_tab_name = name
-
+        name, tab = self._create_tab_handle()  # type: ignore[attr-defined]
+        tab_lock = self._tab_lock_for(name)
         try:
-            tab.get(url)  # type: ignore[union-attr]
-            tab.wait(3)
+            with tab_lock:
+                if cookies:
+                    tab.set.cookies(cookies)  # type: ignore[union-attr]
+                tab.get(url)  # type: ignore[union-attr]
+                tab.wait(3)
 
-            orchestrator = ChallengeOrchestrator(timeout=timeout)
-            challenge_result = orchestrator.resolve(tab)
+                orchestrator = ChallengeOrchestrator(timeout=timeout)
+                challenge_result = orchestrator.resolve(tab)
 
             headers_json = json.dumps(headers or {})
             body_str = data if isinstance(data, str) else json.dumps(data) if data is not None else ""

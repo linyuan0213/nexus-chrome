@@ -21,15 +21,20 @@ class DownloadMixin(FetchMixin):
         save_path: Optional[str] = None,
         timeout: int = 60,
     ) -> Dict[str, Any]:
-        """使用浏览器网络栈下载文件（自动携带会话 Cookie / UA / 过盾能力）。
-
-        优先使用浏览器原生下载（DrissionPage download 管理器）；失败时回退到
-        页面内 fetch 取二进制。返回 base64 与文件信息。
-
-        Returns:
-            {"url", "content_type", "base64", "size", "saved_path"(可选), "error"(可选)}
-        """
+        """使用浏览器网络栈下载文件（自动携带会话 Cookie / UA / 过盾能力）。"""
         self.touch()
+        name, tab = self._lookup_tab()  # type: ignore[attr-defined]
+        with self._tab_lock_for(name):
+            return self._download_unlocked(url, headers, save_path, timeout, tab)
+
+    def _download_unlocked(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        save_path: Optional[str] = None,
+        timeout: int = 60,
+        tab: Any = None,
+    ) -> Dict[str, Any]:
         domain = urlparse(url).netloc
         cookie_header = self.cookie_store.as_header(domain)
         if headers:
@@ -40,14 +45,11 @@ class DownloadMixin(FetchMixin):
             )
         # 先导航到同域过盾（如首次访问被 WAF 拦截），再触发下载
         try:
-            if domain and (
-                self._active_tab_name is None or urlparse(self._get_active_tab().url).netloc != domain  # type: ignore[union-attr]
-            ):
+            if domain and urlparse(str(tab.url or "")).netloc != domain:  # type: ignore[union-attr]
                 self._browser_fetch_get(url, cookie_header, None, timeout=min(timeout, 30))
         except Exception as e:
             logger.debug(f"[Session:{self.id}] 下载前导航过盾失败(可忽略): {e}")
 
-        tab = self._get_active_tab()
         # 浏览器原生下载：命中挑战时浏览器会自动过盾并落盘（DrissionPage 下载管理器）
         try:
             tab_any: Any = tab
@@ -65,11 +67,10 @@ class DownloadMixin(FetchMixin):
             raise RuntimeError("未创建下载任务")
         except Exception as e:
             logger.debug(f"[Session:{self.id}] 浏览器原生下载失败({e})，回退 JS fetch 二进制")
-            return self._download_via_js_fetch(url, timeout)
+            return self._download_via_js_fetch(url, timeout, tab)
 
-    def _download_via_js_fetch(self, url: str, timeout: int) -> Dict[str, Any]:
+    def _download_via_js_fetch(self, url: str, timeout: int, tab: Any) -> Dict[str, Any]:
         """回退方案：页面内 fetch 取二进制（跨域受限时可能失败）。"""
-        tab = self._get_active_tab()
         script = f"""
         async () => {{
             try {{

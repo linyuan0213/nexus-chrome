@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,8 @@ class SessionManager:
         self._session_ttl = session_ttl
         self._persist_file = persist_file
         self._recovered: Dict[str, Dict[str, Any]] = {}
+        # 保护 _sessions/_recovered 与持久化文件；Session 自身另有操作锁。
+        self._lock = threading.RLock()
         self._load_persisted()
 
     @property
@@ -68,8 +71,15 @@ class SessionManager:
         """将当前会话配置（含 Cookie 域）写入持久化文件。"""
         if not self._persist_file:
             return
+        with self._lock:
+            self._save_persisted_locked()
+
+    def _save_persisted_locked(self) -> None:
+        path = self._persist_file
+        if not path:
+            return
         try:
-            os.makedirs(os.path.dirname(self._persist_file), exist_ok=True)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             recs: List[Dict[str, Any]] = []
             for rec in self._recovered.values():
                 recs.append(rec)
@@ -79,27 +89,30 @@ class SessionManager:
                 recs.append(d)
             # 去重（以 id 为准）
             by_id: Dict[str, Dict[str, Any]] = {r["id"]: r for r in recs}
-            tmp = f"{self._persist_file}.tmp"
+            tmp = f"{path}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"sessions": list(by_id.values())}, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, self._persist_file)
+            os.replace(tmp, path)
         except Exception as e:
             logger.debug(f"[SessionManager] 持久化失败: {e}")
 
     def recovered_sessions(self) -> List[Dict[str, Any]]:
         """上次进程遗留、尚未重新创建的会话记录。"""
-        return list(self._recovered.values())
+        with self._lock:
+            return list(self._recovered.values())
 
     def forget_recovered(self, session_id: str) -> None:
-        self._recovered.pop(session_id, None)
-        self._save_persisted()
+        with self._lock:
+            self._recovered.pop(session_id, None)
+            self._save_persisted()
 
     def clear_recovered(self) -> int:
         """清空全部遗留会话记录，返回清除数量。"""
-        n = len(self._recovered)
-        self._recovered.clear()
-        self._save_persisted()
-        return n
+        with self._lock:
+            n = len(self._recovered)
+            self._recovered.clear()
+            self._save_persisted()
+            return n
 
     # ---------- 会话生命周期 ----------
 
@@ -122,64 +135,71 @@ class SessionManager:
         fp_env 为解析后的指纹环境变量（用于网络层 UA 头一致性）。
         instance_key 为该会话使用的浏览器实例 key（用于释放时回收）。
         """
-        if session_id in self._sessions:
-            raise ValueError(f"会话 '{session_id}' 已存在")
-        if len(self._sessions) >= self._max_sessions:
-            oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used_at)
-            logger.warning(f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}")
-            self.delete(oldest_id)
-        fingerprint = FingerprintManager(fingerprint_profile)
-        session = Session(
-            session_id=session_id,
-            browser=browser,
-            fingerprint=fingerprint,
-            user_agent=user_agent,
-            proxy=proxy,
-            fp_profile_id=fp_profile_id,
-            fp_env=fp_env,
-            requested_user_agent=requested_user_agent,
-            requested_fp_profile_id=requested_fp_profile_id,
-        )
-        session.instance_key = instance_key
-        self._sessions[session_id] = session
-        self._recovered.pop(session_id, None)
-        self._save_persisted()
+        with self._lock:
+            if session_id in self._sessions:
+                raise ValueError(f"会话 '{session_id}' 已存在")
+            if len(self._sessions) >= self._max_sessions:
+                oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used_at)
+                logger.warning(f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}")
+                self.delete(oldest_id)
+            fingerprint = FingerprintManager(fingerprint_profile)
+            session = Session(
+                session_id=session_id,
+                browser=browser,
+                fingerprint=fingerprint,
+                user_agent=user_agent,
+                proxy=proxy,
+                fp_profile_id=fp_profile_id,
+                fp_env=fp_env,
+                requested_user_agent=requested_user_agent,
+                requested_fp_profile_id=requested_fp_profile_id,
+            )
+            session.instance_key = instance_key
+            self._sessions[session_id] = session
+            self._recovered.pop(session_id, None)
+            self._save_persisted()
         publish_event("session_created", {"id": session_id, "fp_profile_id": fp_profile_id})
         return session
 
     def get(self, session_id: str) -> Session:
-        if session_id not in self._sessions:
-            raise ValueError(f"会话 '{session_id}' 未找到")
-        session = self._sessions[session_id]
-        session.touch()
-        return session
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise ValueError(f"会话 '{session_id}' 未找到")
+            session.touch()
+            return session
 
     def list_all(self) -> List[Dict[str, Any]]:
-        return [s.to_dict() for s in self._sessions.values()]
+        with self._lock:
+            sessions = list(self._sessions.values())
+        return [s.to_dict() for s in sessions]
 
     def delete(self, session_id: str) -> None:
-        if session_id not in self._sessions:
-            raise ValueError(f"会话 '{session_id}' 未找到")
-        session = self._sessions.pop(session_id)
-        session.close()
-        # 释放浏览器实例引用（无其他会话使用时回收实例，释放内存）
-        if session.instance_key and self._pool is not None:
-            try:
-                self._pool.release(session.instance_key)
-            except Exception as e:
-                logger.debug(f"[SessionManager] 释放实例引用失败: {e}")
-        self._save_persisted()
+        with self._lock:
+            session = self._sessions.pop(session_id, None)
+            if session is None:
+                raise ValueError(f"会话 '{session_id}' 未找到")
+            session.close()
+            # 释放浏览器实例引用（无其他会话使用时回收实例，释放内存）
+            if session.instance_key and self._pool is not None:
+                try:
+                    self._pool.release(session.instance_key)
+                except Exception as e:
+                    logger.debug(f"[SessionManager] 释放实例引用失败: {e}")
+            self._save_persisted()
         publish_event("session_deleted", {"id": session_id})
 
     def delete_all(self) -> None:
-        for sid in list(self._sessions.keys()):
-            self.delete(sid)
+        with self._lock:
+            for sid in list(self._sessions.keys()):
+                self.delete(sid)
 
     def delete_expired(self, max_idle_seconds: Optional[int] = None) -> int:
         """清理超过空闲时间的会话，返回清理数量。"""
         threshold = max_idle_seconds if max_idle_seconds is not None else self._session_ttl
         now = time.monotonic()
-        expired = [sid for sid, s in self._sessions.items() if now - s.last_used_at > threshold]
-        for sid in expired:
-            self.delete(sid)
-        return len(expired)
+        with self._lock:
+            expired = [sid for sid, s in self._sessions.items() if now - s.last_used_at > threshold]
+            for sid in expired:
+                self.delete(sid)
+            return len(expired)
