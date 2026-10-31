@@ -339,6 +339,7 @@ def _solve_turnstile(
     tries: int,
     is_box: bool,
     prelocated: Optional[TurnstileBox] = None,
+    deadline: Optional[float] = None,
 ) -> Tuple[bool, bool]:
     """尝试解决 Turnstile 挑战，失败时刷新页面重试。
 
@@ -356,6 +357,8 @@ def _solve_turnstile(
     success = False
     located = prelocated
     for _ in range(max(1, tries)):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         # 快路径：标题命中挑战标题则不读全量 html（省 ~10s/次）
         if not page_title_is_challenge(page) and not check(page.html):
             success = True
@@ -375,6 +378,8 @@ def _solve_turnstile(
         # 等待挑战判定结果。复用已连接的盒子（元素可能重渲染，success/error
         # 判定内部捕获异常），避免每次循环都触发跨域 iframe 帧连接。
         for _ in range(15):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             cur_box = located.box
             if _turnstile_success(cur_box):
                 success = True
@@ -414,6 +419,7 @@ def sync_cf_retry(
     page: ChromiumTab,
     tries: int = 5,
     prelocated: Optional[TurnstileBox] = None,
+    deadline: Optional[float] = None,
 ) -> Tuple[bool, bool]:
     """
     同步重试CloudFlare挑战解决
@@ -429,18 +435,19 @@ def sync_cf_retry(
     # 标题命中挑战 → 直接解决（跳过全量 html，省 ~10s）；
     # 标题未命中 → 读一次 html 确认是否挑战，正常页面短路返回
     if prelocated is not None:
-        return _solve_turnstile(page, tries, is_box=False, prelocated=prelocated)
+        return _solve_turnstile(page, tries, is_box=False, prelocated=prelocated, deadline=deadline)
     if page_title_is_challenge(page):
-        return _solve_turnstile(page, tries, is_box=False)
+        return _solve_turnstile(page, tries, is_box=False, deadline=deadline)
     if not under_challenge(page.html):
         return True, False
-    return _solve_turnstile(page, tries, is_box=False)
+    return _solve_turnstile(page, tries, is_box=False, deadline=deadline)
 
 
 def sync_cf_box_retry(
     page: ChromiumTab,
     tries: int = 3,
     prelocated: Optional[TurnstileBox] = None,
+    deadline: Optional[float] = None,
 ) -> Tuple[bool, bool]:
     """
     同步重试CloudFlare盒子挑战解决
@@ -454,9 +461,9 @@ def sync_cf_box_retry(
         Tuple[bool, bool]: (success, was_challenge)
     """
     if prelocated is not None:
-        return _solve_turnstile(page, tries, is_box=True, prelocated=prelocated)
+        return _solve_turnstile(page, tries, is_box=True, prelocated=prelocated, deadline=deadline)
     if page_title_is_challenge(page):
-        return _solve_turnstile(page, tries, is_box=True)
+        return _solve_turnstile(page, tries, is_box=True, deadline=deadline)
     if not under_box_challenge(page.html):
         return True, False
-    return _solve_turnstile(page, tries, is_box=True)
+    return _solve_turnstile(page, tries, is_box=True, deadline=deadline)

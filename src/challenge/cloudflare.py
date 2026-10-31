@@ -160,21 +160,24 @@ class CloudflareResolver(ChallengeResolver):
     def _solve_standard(self, tab: ChromiumTab, timeout: int) -> bool:
         """标准 Cloudflare 挑战：尝试点击 Turnstile 复选框。"""
         logger.debug("Cloudflare 标准挑战，尝试点击验证按钮...")
-        tries = max(1, min(timeout // 10, 2))
-        success, _ = sync_cf_retry(tab, tries=tries)
+        deadline = time.monotonic() + max(1, timeout)
+        tries = max(1, min(timeout // 20, 2))
+        success, _ = sync_cf_retry(tab, tries=tries, deadline=deadline)
         if success:
             return True
-        # 兜底：再等待挑战自动清除
-        return self._wait_challenge_cleared(tab, timeout)
+        remaining = max(0.0, deadline - time.monotonic())
+        return self._wait_challenge_cleared(tab, int(remaining)) if remaining > 0 else False
 
     def _solve_box(self, tab: ChromiumTab, timeout: int, located: Optional[TurnstileBox] = None) -> bool:
         """Turnstile 盒子挑战：尝试点击盒子内的验证按钮。"""
         logger.debug("Cloudflare Turnstile 盒子挑战，尝试点击...")
-        tries = max(1, min(timeout // 10, 2))
-        success, _ = sync_cf_box_retry(tab, tries=tries, prelocated=located)
+        deadline = time.monotonic() + max(1, timeout)
+        tries = max(1, min(timeout // 20, 2))
+        success, _ = sync_cf_box_retry(tab, tries=tries, prelocated=located, deadline=deadline)
         if success:
             return True
-        return self._wait_challenge_cleared(tab, timeout)
+        remaining = max(0.0, deadline - time.monotonic())
+        return self._wait_challenge_cleared(tab, int(remaining)) if remaining > 0 else False
 
     def solve_embedded_widget(self, tab: ChromiumTab, timeout: int = 25) -> bool:
         """尝试解决业务页面内嵌的 Turnstile 组件（如签到页的“请验证您是真人”复选框）。

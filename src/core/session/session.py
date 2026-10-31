@@ -111,13 +111,15 @@ class Session(TabMixin):
     ) -> None:
         """应用 Cookie/Referer/LocalStorage；新建页和复用页共用同一套状态."""
         domain = urlparse(url).netloc
-        cookies = self._parse_cookie_header(cookie) if cookie else []
-        if not cookie:
-            stored = self.cookie_store.get(domain)
-            for c in stored:
-                c.setdefault("domain", domain)
-                c.setdefault("path", "/")
-            cookies = stored
+        # 会话内 cf_clearance 等 Cookie 不能被 provider 传入的静态 Cookie 覆盖；
+        # 同名时显式 Cookie 优先，其余保留 session store 中的值。
+        merged: Dict[str, Dict[str, Any]] = {}
+        for c in self.cookie_store.get(domain):
+            merged[str(c.get("name") or "")] = dict(c)
+        if cookie:
+            for c in self._parse_cookie_header(cookie):
+                merged[str(c.get("name") or "")] = dict(c)
+        cookies = [c for name, c in merged.items() if name]
         if cookies:
             cookies = self.limit_cookie_header(cookies)
             for c in cookies:

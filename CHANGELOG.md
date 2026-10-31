@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.7] - 2026-10-31
+
+### 修复
+
+- Cloudflare 挑战求解增加硬截止，避免超时后继续重试导致请求长时间挂起。
+- 导航 Cookie 合并 Session CookieStore，避免 `cf_clearance` 被显式 Cookie 覆盖。
+
 ## [v3.4.6] - 2026-10-31
 
 ### 修复
