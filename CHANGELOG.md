@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.6] - 2026-10-31
+
+### 修复
+
+- **同一 Session 下不同标签页无法并行**：Session 锁改为只保护 `_tabs` 注册表和 active 指针，导航、读取、点击、输入、截图、下载、m3u8 探测改用独立 tab 锁。同一 tab 仍串行，不同 tab 可并行，Cookie 仍由 Session 共享。
+- **过盾并发风暴**：没有 `cf_clearance` 时按 `session + domain` 串行导航，避免并发请求各自创建“请稍候”标签页；已有有效 clearance 后同域 tab 恢复并行。
+- **失效 clearance 被反复复用**：挑战失败后将 domain 标记为需要重新过盾，并通过 CDP 删除失效的 `cf_clearance` / `cf_chl_*`；后续请求重新串行过盾。
+- **导航中途切页**：显式 `tab_name` 不再被同 URL 的活动页截胡；读取复用页面时复核实际 URL，避免返回其他请求中途导航后的内容。
+- **标签页生命周期**：临时 tab 在 `finally` 关闭；失败导航只清理本次创建的 tab，不销毁旧页；用户标签页不由持久会话关闭。
+- **标签页关闭失败**：`close_tab` 成功后才移除句柄，失败保留以便重试；`create_tab` 失败增加 CDP 兜底。
+- **代理切换泄漏**：`set_proxy` 真正关闭旧标签页后再销毁旧上下文，不再只从字典移除。
+- **SessionManager 并发**：会话注册表、持久化文件和 LRU 删除加锁，避免并发创建/删除/保存互相破坏。
+- **API 阻塞事件循环**：`list_sessions`、`get_cookies`、`delete_cookie` 改为线程执行；`ExecuteRequest` 支持指定 `tab_name`；`NavigateRequest.local_storage` 正确转发。
+- **browser_fetch 临时页**：GET 使用独立临时 tab，结束后关闭，避免污染活动页。
+- **内嵌 Turnstile 空等**：无 Turnstile 线索的普通页面立即跳过组件检测，减少导航固定等待。
+
+### 测试
+
+- 补充同 Session 不同 tab 并行、同域 clearance 后并行、失败 tab 清理、显式 tab 不被截胡、关闭失败保留句柄、原子快照读取和异步客户端契约测试。
+
 ## [v3.4.5] - 2026-10-19
 
 ### 修复

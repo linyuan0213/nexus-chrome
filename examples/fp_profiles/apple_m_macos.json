@@ -5,6 +5,7 @@
     "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
     "platform": "MacIntel",
     "uad_platform": "macOS",
+    "uad_arch": "arm64",
     "uad_platform_version": "15.3.0",
     "webgl_vendor": "Google Inc. (Apple)",
     "webgl_renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",

@@ -13,21 +13,20 @@ class MediaMixin(DownloadMixin):
     """抓取并解析 m3u8 播放列表（主列表 / 媒体列表）。"""
 
     def detect_m3u8(self, url: str, timeout: int = 30) -> Dict[str, Any]:
-        """抓取并解析 m3u8 播放列表（支持主列表与媒体列表）。
-
-        Returns:
-            {"url", "type": "master"|"media"|"unknown", "streams": [{bandwidth, resolution, url}],
-             "segments": [{duration, url}], "raw"(截断)}
-        """
+        """抓取并解析 m3u8 播放列表（支持主列表与媒体列表）。"""
         self.touch()
+        name, tab = self._lookup_tab()  # type: ignore[attr-defined]
+        with self._tab_lock_for(name):
+            return self._detect_m3u8_unlocked(url, timeout, tab)
+
+    def _detect_m3u8_unlocked(self, url: str, timeout: int, tab: Any) -> Dict[str, Any]:
         domain = urlparse(url).netloc
         # 先确保已过盾（同域导航），再用浏览器下载管理器取播放列表（跨域可靠）
         try:
-            if self._active_tab_name is None or urlparse(self._get_active_tab().url).netloc != domain:  # type: ignore[union-attr]
+            if urlparse(str(tab.url or "")).netloc != domain:
                 self._browser_fetch_get(url, self.cookie_store.as_header(domain), None, timeout=min(timeout, 20))
         except Exception as e:
             logger.debug(f"[Session:{self.id}] m3u8 过盾导航失败(可忽略): {e}")
-        tab = self._get_active_tab()
         try:
             tab_any: Any = tab
             mission: Any = tab_any._download_by_browser(url, save_path="/tmp", timeout=timeout)

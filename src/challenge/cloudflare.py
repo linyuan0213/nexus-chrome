@@ -191,6 +191,38 @@ class CloudflareResolver(ChallengeResolver):
             是否完成（拿到 token 或表单已提交）。
         """
         deadline = time.monotonic() + max(1, timeout)
+        # 只对真正有 Turnstile 线索的页面进入组件处理；普通页面立即跳过。
+        markers = (
+            "turnstile",
+            "cf-turnstile-response",
+            "challenges.cloudflare.com",
+            "data-sitekey",
+        )
+
+        def _has_html_marker() -> bool:
+            try:
+                html = tab.html.lower()
+            except Exception:
+                return False
+            return any(marker in html for marker in markers)
+
+        def _has_dom_widget() -> bool:
+            # 零/极短超时探测，不等待异步组件。
+            for selector in (
+                "css:.cf-turnstile",
+                'css:input[name="cf-turnstile-response"]',
+                'css:iframe[src*="challenges.cloudflare.com"]',
+            ):
+                try:
+                    if tab.ele(selector, timeout=0.1):  # type: ignore[union-attr]
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        if not _has_html_marker() and not _has_dom_widget():
+            logger.debug("页面无 Turnstile 线索，跳过内嵌组件检测")
+            return False
         initial_token = turnstile_token(tab)
         # 组件可能异步加载（脚本来自 challenges.cloudflare.com）：先给一个短宽限期
         # 轮询等待其出现。宽限期必须远小于整体 timeout——绝大多数业务页没有内嵌

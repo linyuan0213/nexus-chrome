@@ -1,5 +1,6 @@
 """Session 模块单元测试 — 使用 mock 浏览器，无需真实 Chrome。"""
 
+import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -118,7 +119,34 @@ class TestSessionNavigate:
         mock_browser.new_tab.assert_called_once()
         assert result["url"] == "https://example.com/"
         assert result["cookies"]["session_id"] == "abc123"
+
+    def test_navigate_same_url_reuses_active_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"solved": True}
+            session.navigate("https://example.com/")
+            result = session.navigate("https://example.com/")
+        assert result["challenge"]["reused"] is True
+        mock_browser.new_tab.assert_called_once()
         assert session.cookie_store.as_dict("example.com")["session_id"] == "abc123"
+
+    def test_explicit_tab_name_is_not_hijacked_by_active_same_url(self, mock_browser, mock_tab):
+        new_tab = MagicMock()
+        new_tab.url = "https://example.com/"
+        new_tab.title = "fixed"
+        new_tab.html = "<html>fixed</html>"
+        new_tab.cookies.return_value = []
+        mock_browser.new_tab.side_effect = [mock_tab, new_tab]
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"detected": False, "solved": True}
+            session.navigate("https://example.com/")
+            session.navigate("https://example.com/", tab_name="fixed")
+
+        assert session._tabs["fixed"] is new_tab
+        assert session._active_tab_name == "fixed"
+        assert mock_browser.new_tab.call_count == 2
 
     def test_navigate_init_js_before_load(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
@@ -234,6 +262,150 @@ class TestSessionInteraction:
         mock_tab.run_js.assert_called_once_with("return document.title")
 
 
+class TestSessionReadOnlyLifecycle:
+    """读取/交互不能隐式创建页面，失败导航不能销毁旧活动页。"""
+
+    def test_get_html_without_tab_does_not_create(self, mock_browser):
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        assert session.get_html() == {"url": "", "html": ""}
+        mock_browser.new_tab.assert_not_called()
+
+    def test_interaction_without_tab_raises_without_create(self, mock_browser):
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with pytest.raises(ValueError):
+            session.click("#btn")
+        mock_browser.new_tab.assert_not_called()
+
+    def test_failed_in_place_navigation_keeps_tab(self, mock_browser, mock_tab):
+        mock_tab.get.side_effect = [None, RuntimeError("navigation failed")]
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"solved": True}
+            session.navigate("https://example.com/")
+            with pytest.raises(RuntimeError):
+                session.navigate("https://example.org/")
+
+        assert session._active_tab_name == "tab_1"
+        assert len(session._tabs) == 1
+        assert session._tabs["tab_1"] is mock_tab
+        assert mock_tab.close.call_count == 0
+
+    def test_browser_error_page_is_rejected_and_keeps_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"detected": False, "solved": True}
+            session.navigate("https://example.com/")
+            mock_tab.url = "chrome-error://chromewebdata/"
+            mock_tab.title = "127.0.0.1"
+            mock_tab.html = '<html><body id="main-frame-error">ERR_CONNECTION_REFUSED</body></html>'
+            with pytest.raises(RuntimeError, match="浏览器导航失败"):
+                session.navigate("http://127.0.0.1:1/")
+
+        assert session._active_tab_name == "tab_1"
+        assert session._tabs["tab_1"] is mock_tab
+        assert mock_tab.close.call_count == 0
+
+    def test_failed_named_replace_keeps_old_named_tab(self, mock_browser, mock_tab):
+        failed_tab = MagicMock()
+        mock_browser.new_tab.side_effect = [mock_tab, failed_tab]
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"solved": True}
+            session.navigate("https://example.com/", tab_name="work")
+            MockOrchestrator.return_value.resolve.side_effect = RuntimeError("challenge failed")
+            with pytest.raises(RuntimeError):
+                session.navigate("https://example.org/", tab_name="work")
+
+        assert session._active_tab_name == "work"
+        assert "work" in session._tabs
+        assert "tab_2" not in session._tabs
+        failed_tab.close.assert_called_once()
+
+
+class TestTabConcurrency:
+    def test_different_domains_navigate_in_parallel(self, mock_browser):
+        started = [threading.Event(), threading.Event()]
+        release = threading.Event()
+        tabs = []
+        for idx in range(2):
+            tab = MagicMock()
+            tab.url = f"https://example{idx}.com/"
+            tab.title = str(idx)
+            tab.html = f"<html>{idx}</html>"
+            tab.cookies.return_value = []
+
+            def _get(_url, i=idx):
+                started[i].set()
+                if not release.wait(2):
+                    raise TimeoutError("test timeout")
+
+            tab.get.side_effect = _get
+            tabs.append(tab)
+        mock_browser.new_tab.side_effect = tabs
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        results: list[Any] = []
+        errors: list[BaseException] = []
+
+        def run(url, name):
+            try:
+                results.append(session.navigate(url, tab_name=name))
+            except BaseException as e:  # noqa: BLE001
+                errors.append(e)
+
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"detected": False, "solved": True}
+            t1 = threading.Thread(target=run, args=("https://example0.com/", "t1"))
+            t2 = threading.Thread(target=run, args=("https://example1.com/", "t2"))
+            t1.start()
+            t2.start()
+            # 两个 tab 都进入导航，证明 session 锁没有把不同 tab 串行化。
+            assert started[0].wait(1)
+            assert started[1].wait(1)
+            release.set()
+            t1.join(2)
+            t2.join(2)
+
+        assert not errors
+        assert len(results) == 2
+        assert set(session._tabs) == {"t1", "t2"}
+
+    def test_same_domain_tabs_parallel_after_clearance(self, mock_browser):
+        started = [threading.Event(), threading.Event()]
+        release = threading.Event()
+        tabs = []
+        for idx in range(2):
+            tab = MagicMock()
+            tab.url = f"https://example.com/{idx}"
+            tab.title = str(idx)
+            tab.html = f"<html>{idx}</html>"
+            tab.cookies.return_value = []
+
+            def _get(_url, i=idx):
+                started[i].set()
+                if not release.wait(2):
+                    raise TimeoutError("test timeout")
+
+            tab.get.side_effect = _get
+            tabs.append(tab)
+        mock_browser.new_tab.side_effect = tabs
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        session.cookie_store.store("example.com", [{"name": "cf_clearance", "value": "ok"}])
+
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"detected": False, "solved": True}
+            t1 = threading.Thread(target=session.navigate, args=("https://example.com/0",), kwargs={"tab_name": "t1"})
+            t2 = threading.Thread(target=session.navigate, args=("https://example.com/1",), kwargs={"tab_name": "t2"})
+            t1.start()
+            t2.start()
+            assert started[0].wait(1)
+            assert started[1].wait(1)
+            release.set()
+            t1.join(2)
+            t2.join(2)
+
+
 class TestSessionClose:
     def test_close_tab(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
@@ -249,6 +421,19 @@ class TestSessionClose:
         session.close_tab("tab_1")
         mock_tab.close.assert_called_once()
         assert session._active_tab_name is None
+
+    def test_close_tab_failure_keeps_handle_for_retry(self, mock_browser, mock_tab):
+        mock_tab.close.side_effect = RuntimeError("close failed")
+        mock_browser._run_cdp.side_effect = RuntimeError("cdp failed")
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        session._tabs["tab_1"] = mock_tab
+        session._active_tab_name = "tab_1"
+
+        with pytest.raises(RuntimeError):
+            session.close_tab("tab_1")
+
+        assert "tab_1" in session._tabs
+        assert session._active_tab_name == "tab_1"
 
 
 class TestSessionManagerLimits:
@@ -273,7 +458,7 @@ class TestSessionManagerLimits:
 
 
 class TestSessionTabLifecycle:
-    def test_navigate_closes_previous_active_tab(self, mock_browser, mock_tab):
+    def test_navigate_reuses_active_tab(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
 
@@ -287,8 +472,10 @@ class TestSessionTabLifecycle:
             session.navigate("https://example.com/")
             session.navigate("https://example.org/")
 
-        assert mock_tab.close.call_count == 1
+        assert mock_tab.close.call_count == 0
         assert len(session._tabs) == 1
+        assert mock_browser.new_tab.call_count == 1
+        assert mock_tab.get.call_count == 2
 
     def test_navigate_replaces_named_tab(self, mock_browser, mock_tab):
         mock_browser.new_tab.return_value = mock_tab

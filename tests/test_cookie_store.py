@@ -107,6 +107,15 @@ class TestCookieStore:
         header = store.as_header_for_url("https://example.com/page")
         assert "a=1" in header
 
+    def test_expired_cookies_are_pruned(self):
+        import time
+
+        store = CookieStore()
+        store.store("example.com", [{"name": "old", "value": "x", "expires": time.time() - 1}])
+        store.store("example.com", [{"name": "new", "value": "y", "expires": time.time() + 60}])
+        assert store.as_dict("example.com") == {"new": "y"}
+        assert store.as_header("example.com") == "new=y"
+
     def test_thread_safety(self):
         import threading
 
