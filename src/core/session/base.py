@@ -123,8 +123,7 @@ class SessionBase:
                 userAgentMetadata=metadata,
             )
         except Exception as e:
-            logger.debug(f"[Session:{self.id}] Emulation UA 覆盖失败，回退 tab.set.user_agent: {e}")
-            tab.set.user_agent(ua, platform=platform)  # type: ignore[union-attr]
+            raise RuntimeError(f"[Session:{self.id}] Emulation UA 覆盖失败，不能继续使用不自洽的指纹: {e}") from e
 
     def _apply_init_js(self, tab: ChromiumTab) -> None:
         """在导航前注入 Turnstile 组件修复，提升挑战通过率。
@@ -246,4 +245,4 @@ class SessionBase:
                 userAgentMetadata=metadata,
             )
         except Exception as e:
-            logger.debug(f"[Session:{self.id}] 设置网络层 UA 覆盖失败: {e}")
+            raise RuntimeError(f"[Session:{self.id}] 设置网络层 UA 覆盖失败: {e}") from e

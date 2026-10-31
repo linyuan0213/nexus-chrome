@@ -76,8 +76,11 @@ class TestProfileFitsUa:
     def test_conflict_major(self):
         assert profile_fits_ua(self._WIN, WIN_UA.replace("Chrome/155", "Chrome/151")) is False
 
-    def test_unknown_ua_not_restricted(self):
-        assert profile_fits_ua(self._WIN, "curl/8.0") is True
+    def test_unknown_ua_is_rejected(self):
+        assert profile_fits_ua(self._WIN, "curl/8.0") is False
+
+    def test_non_chrome_ua_is_rejected(self):
+        assert profile_fits_ua(self._WIN, "Mozilla/5.0 (X11) Gecko/20100101 Firefox/91.0") is False
 
     def test_missing_env_not_restricted(self):
         assert profile_fits_ua(None, WIN_UA) is True

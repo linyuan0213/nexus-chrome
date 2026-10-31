@@ -17,6 +17,7 @@ class _FakeInst:
         self.display = ":1"
         self.vnc_port = 5900
         self.web_port = 6080
+        self.fp_env = kwargs.get("fp_env") or {}
 
     def ensure(self):
         return self
@@ -69,3 +70,12 @@ def test_ensure_browser_with_profile_returns_actual_key():
         pool = BrowserPool(max_browsers=2)
         _browser, key = pool.ensure_browser_with_profile("user_1")
         assert key == "user_1"
+
+
+def test_idle_instance_is_recreated_when_fp_env_changes():
+    with patch("src.core.browser_manager.pool.ChromeInstance", _FakeInst):
+        pool = BrowserPool(max_browsers=2)
+        first = pool.get("user_1", {"FP_UA_BRAND": "150"})
+        second = pool.get("user_1", {"FP_UA_BRAND": "155"})
+        assert second is not first
+        assert first.is_alive is False

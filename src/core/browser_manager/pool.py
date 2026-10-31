@@ -115,7 +115,16 @@ class BrowserPool:
         with self._lock:
             inst = self._instances.get(key)
             if inst is not None:
-                return inst
+                requested_env = dict(fp_env) if fp_env else {}
+                if inst.fp_env != requested_env:
+                    # 画像变化后不能继续复用旧 Chromium 环境；只在空闲时安全重建。
+                    if inst.is_idle:
+                        self._close_instance(key, "画像环境变化")
+                    else:
+                        logger.warning(f"[pool] {key} 画像环境已变化，但实例正在使用，暂不强制关闭")
+                        return inst
+                else:
+                    return inst
             self._evict_if_needed()
             # 不跨画像复用实例：把画像 A 的会话跑在画像 B 的实例上会造成指纹/UA
             # 与 session 声明不一致，直接被 Cloudflare 拦截。达上限且无空闲实例时

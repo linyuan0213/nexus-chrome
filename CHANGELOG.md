@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.6] - 2026-10-31
+
+### 修复
+
+- 导航优先复用当前活动页，只有 URL 变化时才创建新标签页；新页面成功后再关闭旧页，避免失败后会话没有活动页。
+- CookieStore 按 expires 清理过期 Cookie，避免残留 cf_clearance 反复触发挑战。
+- 会话导航加锁，降低并发导航/关页竞争。
+- 补充同 URL 复用和 Cookie 过期测试。
+
 ## [v3.4.5] - 2026-10-19
 
 ### 修复

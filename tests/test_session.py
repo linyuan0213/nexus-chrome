@@ -118,6 +118,16 @@ class TestSessionNavigate:
         mock_browser.new_tab.assert_called_once()
         assert result["url"] == "https://example.com/"
         assert result["cookies"]["session_id"] == "abc123"
+
+    def test_navigate_same_url_reuses_active_tab(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {"solved": True}
+            session.navigate("https://example.com/")
+            result = session.navigate("https://example.com/")
+        assert result["challenge"]["reused"] is True
+        mock_browser.new_tab.assert_called_once()
         assert session.cookie_store.as_dict("example.com")["session_id"] == "abc123"
 
     def test_navigate_init_js_before_load(self, mock_browser, mock_tab):

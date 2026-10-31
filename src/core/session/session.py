@@ -1,6 +1,7 @@
 """Session — 会话核心：初始化、导航过盾、页面交互、代理切换。"""
 
 import time
+from threading import RLock
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -43,6 +44,7 @@ class Session(TabMixin):
         self._proxy = proxy
         self._proxy_context: Any = None
         self._tabs: Dict[str, ChromiumTab] = {}
+        self._lock = RLock()
         self.instance_key: Optional[str] = None
         self._active_tab_name: Optional[str] = None
         self._tab_counter = 0
@@ -125,11 +127,47 @@ class Session(TabMixin):
         timeout: int = CHALLENGE_TIMEOUT,
         local_storage: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
+        with self._lock:
+            return self._navigate_unlocked(url, tab_name, cookie, referer, timeout, local_storage)
+
+    def _navigate_unlocked(
+        self,
+        url: str,
+        tab_name: Optional[str] = None,
+        cookie: Optional[str] = None,
+        referer: Optional[str] = None,
+        timeout: int = CHALLENGE_TIMEOUT,
+        local_storage: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         self.touch()
-        if tab_name is None and self._active_tab_name is not None:
-            self.close_tab(self._active_tab_name)
-        elif tab_name is not None and tab_name in self._tabs:
+        previous = self._active_tab_name
+        if tab_name and tab_name in self._tabs:
+            named = self._tabs[tab_name]
+            if str(getattr(named, "url", "")).rstrip("/") == url.rstrip("/"):
+                self._active_tab_name = tab_name
+                self._sync_page_cookies(named, urlparse(url).netloc)
+                return {
+                    "url": named.url,
+                    "title": getattr(named, "title", ""),
+                    "html": named.html,
+                    "cookies": self.cookie_store.as_dict(urlparse(url).netloc),
+                    "cookie_header": self.cookie_store.as_header(urlparse(url).netloc),
+                    "challenge": {"solved": True, "reused": True},
+                }
             self.close_tab(tab_name)
+        if previous and previous in self._tabs:
+            current = self._tabs[previous]
+            if str(getattr(current, "url", "")).rstrip("/") == url.rstrip("/"):
+                # 同 URL 时直接复用活动页，不重复创建/关闭标签页。
+                self._sync_page_cookies(current, urlparse(url).netloc)
+                return {
+                    "url": current.url,
+                    "title": getattr(current, "title", ""),
+                    "html": current.html,
+                    "cookies": self.cookie_store.as_dict(urlparse(url).netloc),
+                    "cookie_header": self.cookie_store.as_header(urlparse(url).netloc),
+                    "challenge": {"solved": True, "reused": True},
+                }
         tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer, local_storage=local_storage)
         try:
             orchestrator = ChallengeOrchestrator(timeout=timeout)
@@ -149,6 +187,10 @@ class Session(TabMixin):
                 page_title = tab.title
             except Exception:
                 logger.debug("读取页面 URL/标题失败，使用原始 URL")
+
+            # 新页面成功后再关闭旧页，避免建页失败导致会话无活动标签页。
+            if previous and previous != self._active_tab_name:
+                self.close_tab(previous)
 
             return {
                 "url": page_url,

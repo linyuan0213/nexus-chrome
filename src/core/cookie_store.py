@@ -1,7 +1,8 @@
 """Cookie 共享存储 — 线程安全，按域名隔离。每个 Session 持有独立实例。"""
 
 from threading import RLock
-from typing import Dict, List, Optional
+from time import time
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -10,29 +11,45 @@ from loguru import logger
 class CookieStore:
     def __init__(self):
         self._lock = RLock()
-        self._store: Dict[str, List[Dict[str, str]]] = {}
+        self._store: Dict[str, List[Dict[str, Any]]] = {}
 
-    def store(self, domain: str, cookies: List[Dict[str, str]]) -> None:
+    def store(self, domain: str, cookies: List[Dict[str, Any]]) -> None:
         if not domain or not cookies:
             return
         with self._lock:
+            self._prune_expired(domain)
             existing = {c.get("name"): c for c in self._store.get(domain, [])}
-            for c in cookies:
-                name = c.get("name")
+            for cookie in cookies:
+                name = cookie.get("name")
                 if name:
-                    existing[name] = c
+                    existing[name] = dict(cookie)
             self._store[domain] = list(existing.values())
             logger.debug(f"CookieStore: 存储 {len(cookies)} 个 Cookie → {domain}")
 
-    def store_from_url(self, url: str, cookies: List[Dict[str, str]]) -> None:
+    def store_from_url(self, url: str, cookies: List[Dict[str, Any]]) -> None:
         domain = urlparse(url).netloc
         self.store(domain, cookies)
 
-    def get(self, domain: str) -> List[Dict[str, str]]:
+    def _prune_expired(self, domain: str | None = None) -> None:
+        now = time()
+        domains = [domain] if domain else list(self._store)
+        for current in domains:
+            remaining = [
+                cookie
+                for cookie in self._store.get(current, [])
+                if not cookie.get("expires") or float(cookie["expires"]) > now
+            ]
+            if remaining:
+                self._store[current] = remaining
+            else:
+                self._store.pop(current, None)
+
+    def get(self, domain: str) -> List[Dict[str, Any]]:
         with self._lock:
+            self._prune_expired(domain)
             return list(self._store.get(domain, []))
 
-    def get_for_url(self, url: str) -> List[Dict[str, str]]:
+    def get_for_url(self, url: str) -> List[Dict[str, Any]]:
         domain = urlparse(url).netloc
         return self.get(domain)
 
