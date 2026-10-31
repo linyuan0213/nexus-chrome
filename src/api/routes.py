@@ -60,11 +60,14 @@ async def create_session_route(request: CreateSessionRequest):
 @sessions_router.get("", response_model=ApiResponse)
 async def list_sessions():
     sm = _get_sm()
-    recovered = sm.recovered_sessions()
+    sessions, recovered = await asyncio.gather(
+        asyncio.to_thread(sm.list_all),
+        asyncio.to_thread(sm.recovered_sessions),
+    )
     return ApiResponse(
         code=0,
         message="ok",
-        data={"sessions": sm.list_all(), "recovered": recovered},
+        data={"sessions": sessions, "recovered": recovered},
     )
 
 
@@ -72,7 +75,7 @@ async def list_sessions():
 async def clear_recovered_sessions():
     """清空全部遗留（上次进程退出时未销毁）的会话记录。"""
     sm = _get_sm()
-    n = sm.clear_recovered()
+    n = await asyncio.to_thread(sm.clear_recovered)
     return ApiResponse(code=0, message=f"已清除 {n} 条遗留记录", data=None)
 
 
@@ -98,6 +101,7 @@ async def navigate(session_id: str, request: NavigateRequest):
             request.cookie,
             request.referer,
             request.timeout,
+            request.local_storage,
         )
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
@@ -107,11 +111,11 @@ async def navigate(session_id: str, request: NavigateRequest):
 
 
 @sessions_router.get("/{session_id}/html", response_model=ApiResponse)
-async def get_html(session_id: str):
+async def get_html(session_id: str, tab_name: str | None = Query(None)):
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        result = await asyncio.to_thread(session.get_html)
+        result = await asyncio.to_thread(session.get_html, tab_name)
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -122,7 +126,7 @@ async def get_cookies(session_id: str, domain: str = Query(None)):
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        result = session.get_cookies(domain)
+        result = await asyncio.to_thread(session.get_cookies, domain)
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -134,7 +138,7 @@ async def delete_cookie(session_id: str, domain: str = Query(...), name: str = Q
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        removed = session.delete_cookie(domain, name)
+        removed = await asyncio.to_thread(session.delete_cookie, domain, name)
         return ApiResponse(code=0, message="已删除" if removed else "Cookie 不存在", data=None)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -201,7 +205,7 @@ async def execute_js(session_id: str, request: ExecuteRequest):
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        result = await asyncio.to_thread(session.execute, request.script)
+        result = await asyncio.to_thread(session.execute, request.script, request.tab_name)
         return ApiResponse(code=0, message="ok", data={"result": result})
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

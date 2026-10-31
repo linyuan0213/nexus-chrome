@@ -41,6 +41,7 @@ class InputRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     script: str = Field(..., description="要执行的 JavaScript 代码")
+    tab_name: Optional[str] = Field(default=None, description="在指定标签页执行，不指定则使用活动页")
 
 
 class HttpFetchRequest(BaseModel):

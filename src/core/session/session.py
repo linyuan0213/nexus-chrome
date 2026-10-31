@@ -1,6 +1,7 @@
 """Session — 会话核心：初始化、导航过盾、页面交互、代理切换。"""
 
 import time
+from threading import RLock
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -43,6 +44,13 @@ class Session(TabMixin):
         self._proxy = proxy
         self._proxy_context: Any = None
         self._tabs: Dict[str, ChromiumTab] = {}
+        # registry 锁只保护 _tabs/_active_tab_name/_tab_locks；每个 tab 另有独立锁。
+        self._lock = RLock()
+        self._tab_locks: Dict[str, Any] = {}
+        self._challenge_locks: Dict[str, Any] = {}
+        self._challenge_generations: Dict[str, int] = {}
+        self._challenge_failed: set[str] = set()
+        self._closed = False
         self.instance_key: Optional[str] = None
         self._active_tab_name: Optional[str] = None
         self._tab_counter = 0
@@ -52,66 +60,80 @@ class Session(TabMixin):
             f"(fingerprint={fingerprint.profile_name}, fp_profile={fp_profile_id or 'default'})"
         )
 
-    def _create_tab_internal(
+    def _create_tab_handle(self, tab_name: Optional[str] = None) -> tuple[str, ChromiumTab]:
+        """只创建并注册空标签页；导航在锁外由 _load_tab 完成."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError(f"[Session:{self.id}] 会话已关闭")
+            name = tab_name or self._auto_tab_name()
+            if name in self._tabs:
+                raise ValueError(f"标签页 '{name}' 已存在")
+
+            tab = self._make_tab()
+            try:
+                tab.set.load_mode.none()  # type: ignore[union-attr]
+                self._apply_init_js(tab)
+                self._apply_ua_metadata(tab)  # type: ignore[union-attr]
+                self._apply_user_agent(tab)
+            except Exception:
+                self._close_tab_handle(name, tab)
+                raise
+
+            self._tabs[name] = tab
+            self._tab_locks.setdefault(name, RLock())
+            self._active_tab_name = name
+            return name, tab
+
+    def _load_tab(
         self,
+        tab: ChromiumTab,
         url: str,
-        tab_name: Optional[str] = None,
+        *,
         cookie: Optional[str] = None,
         referer: Optional[str] = None,
+        timeout: int = CHALLENGE_TIMEOUT,
         local_storage: Optional[Dict[str, str]] = None,
-    ) -> ChromiumTab:
-        name = tab_name or self._auto_tab_name()
-        if name in self._tabs:
-            raise ValueError(f"标签页 '{name}' 已存在")
+    ) -> Dict[str, Any]:
+        """在调用方持有的 tab 锁内完成导航/挑战/快照."""
+        tab.set.load_mode.none()  # type: ignore[union-attr]
+        self._apply_tab_options(tab, url, cookie, referer, local_storage)
+        tab.get(url)  # type: ignore[union-attr]
+        tab.wait(1)
+        return self._complete_navigation(tab, url, timeout)
 
-        tab = self._make_tab()
-        try:
-            tab.set.load_mode.none()  # type: ignore[union-attr]
-            self._apply_init_js(tab)
-            self._apply_ua_metadata(tab)  # type: ignore[union-attr]
-            self._apply_user_agent(tab)
-            # Cookie：显式传入优先；未传时自动携带会话内已存储的同域名 Cookie
-            domain = urlparse(url).netloc
-            cookies = self._parse_cookie_header(cookie) if cookie else []
-            if not cookie:
-                stored = self.cookie_store.get(domain)
-                for c in stored:
-                    c.setdefault("domain", domain)
-                    c.setdefault("path", "/")
-                cookies = stored
-            if cookies:
-                for c in cookies:
-                    c.setdefault("domain", domain)
-                    c.setdefault("path", "/")
-                tab.set.cookies(cookies)  # type: ignore[union-attr]
-            if referer:
-                tab.set.headers({"Referer": referer})  # type: ignore[union-attr]
-            if local_storage:
-                try:
-                    for key, value in local_storage.items():
-                        escaped_key = key.replace("'", "\\'")
-                        escaped_value = value.replace("'", "\\'")
-                        tab.run_js(f"localStorage.setItem('{escaped_key}', '{escaped_value}')")  # type: ignore[union-attr]
-                except Exception as e:
-                    logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
-
-            tab.get(url)  # type: ignore[union-attr]
-            tab.wait(3)
-        except Exception:
-            # 导航/初始化失败：关闭已创建的标签页，避免孤儿页面残留
+    def _apply_tab_options(
+        self,
+        tab: ChromiumTab,
+        url: str,
+        cookie: Optional[str],
+        referer: Optional[str],
+        local_storage: Optional[Dict[str, str]],
+    ) -> None:
+        """应用 Cookie/Referer/LocalStorage；新建页和复用页共用同一套状态."""
+        domain = urlparse(url).netloc
+        cookies = self._parse_cookie_header(cookie) if cookie else []
+        if not cookie:
+            stored = self.cookie_store.get(domain)
+            for c in stored:
+                c.setdefault("domain", domain)
+                c.setdefault("path", "/")
+            cookies = stored
+        if cookies:
+            cookies = self.limit_cookie_header(cookies)
+            for c in cookies:
+                c.setdefault("domain", domain)
+                c.setdefault("path", "/")
+            tab.set.cookies(cookies)  # type: ignore[union-attr]
+        if referer:
+            tab.set.headers({"Referer": referer})  # type: ignore[union-attr]
+        if local_storage:
             try:
-                tab.close()
-            except Exception:
-                try:
-                    target_id = getattr(tab, "tab_id", None) or tab._target_id
-                    self._browser._run_cdp("Target.CloseTarget", {"targetId": target_id})  # type: ignore[union-attr]
-                except Exception:
-                    logger.warning(f"[Session:{self.id}] 清理初始化失败的标签页失败，可能已孤儿")
-            raise
-
-        self._tabs[name] = tab
-        self._active_tab_name = name
-        return tab
+                for key, value in local_storage.items():
+                    escaped_key = key.replace("'", "\\'")
+                    escaped_value = value.replace("'", "\\'")
+                    tab.run_js(f"localStorage.setItem('{escaped_key}', '{escaped_value}')")  # type: ignore[union-attr]
+            except Exception as e:
+                logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
 
     def navigate(
         self,
@@ -122,51 +144,240 @@ class Session(TabMixin):
         timeout: int = CHALLENGE_TIMEOUT,
         local_storage: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        self.touch()
-        if tab_name is None and self._active_tab_name is not None:
-            self.close_tab(self._active_tab_name)
-        elif tab_name is not None and tab_name in self._tabs:
-            self.close_tab(tab_name)
-        tab = self._create_tab_internal(url, tab_name, cookie=cookie, referer=referer, local_storage=local_storage)
-        try:
-            orchestrator = ChallengeOrchestrator(timeout=timeout)
-            challenge_result = orchestrator.resolve(tab)
+        # 没有 cf_clearance 时，导航本身也会触发挑战；必须在建 tab 之前
+        # 按 session+domain 串行，否则并发请求会各自开一个“请稍候”标签页。
+        domain = urlparse(url).netloc
+        if self._has_clearance(domain):
+            return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+        gate, _ = self._challenge_gate(domain)
+        with gate:
+            return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+
+    def _navigate_impl(
+        self,
+        url: str,
+        tab_name: Optional[str] = None,
+        cookie: Optional[str] = None,
+        referer: Optional[str] = None,
+        timeout: int = CHALLENGE_TIMEOUT,
+        local_storage: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError(f"[Session:{self.id}] 会话已关闭")
+            self.touch()
+            target = self._tabs.get(tab_name) if tab_name else None
+            previous = self._active_tab_name
+            op_name = ""
+            op_tab: Optional[ChromiumTab] = None
+            created_name: Optional[str] = None
+            replace_name: Optional[str] = None
+            reused = False
+
+            if target is not None and str(getattr(target, "url", "")).rstrip("/") == url.rstrip("/"):
+                op_name, op_tab = tab_name or "", target  # type: ignore[assignment]
+                reused = True
+            elif not tab_name and previous and previous in self._tabs:
+                current = self._tabs[previous]
+                if str(getattr(current, "url", "")).rstrip("/") == url.rstrip("/"):
+                    op_name, op_tab = previous, current
+                    reused = True
+
+            if op_tab is None:
+                if not tab_name and previous and previous in self._tabs:
+                    # 无 tab_name：导航当前标签页，不新建 tab。
+                    op_name, op_tab = previous, self._tabs[previous]
+                else:
+                    replace_name = tab_name if target is not None else None
+                    op_name, op_tab = self._create_tab_handle(None if replace_name else tab_name)
+                    created_name = op_name
+            if reused:
+                self._active_tab_name = op_name
+
+        tab_lock = self._tab_lock_for(op_name)
+        with tab_lock:
+            # 获取 tab 锁后复核注册表，避免并发 close 后使用失效句柄。
+            with self._lock:
+                if self._tabs.get(op_name) is not op_tab and not (replace_name and created_name):
+                    raise ValueError(f"标签页 '{op_name}' 已关闭")
             domain = urlparse(url).netloc
-            html = ""
-            try:
-                html = tab.html
-            except Exception:
-                logger.debug(f"[Session:{self.id}] 读取页面 HTML 失败")
-            self._sync_page_cookies(tab, domain)
+            if reused:
+                self._sync_page_cookies(op_tab, domain)
+                return self._page_result(op_tab, domain, {"solved": True, "reused": True})
 
-            page_url = url
-            page_title = ""
             try:
-                page_url = tab.url
-                page_title = tab.title
+                result = self._load_tab(
+                    op_tab,
+                    url,
+                    cookie=cookie,
+                    referer=referer,
+                    timeout=timeout,
+                    local_storage=local_storage,
+                )
             except Exception:
-                logger.debug("读取页面 URL/标题失败，使用原始 URL")
+                # 本次新建页失败：只在锁内清理自己，不影响旧页。
+                if created_name:
+                    with self._lock:
+                        self._tabs.pop(created_name, None)
+                        self._tab_locks.pop(created_name, None)
+                        if self._active_tab_name == created_name:
+                            fallback = previous if previous in self._tabs else next(reversed(self._tabs), None)
+                            self._active_tab_name = fallback
+                    try:
+                        self._close_tab_handle(created_name, op_tab)
+                    except Exception:
+                        logger.warning(f"[Session:{self.id}] 清理异常导航标签页 {created_name} 失败")
+                raise
 
-            return {
-                "url": page_url,
-                "title": page_title,
-                "html": html,
-                "cookies": self.cookie_store.as_dict(domain),
-                "cookie_header": self.cookie_store.as_header(domain),
-                "challenge": challenge_result,
-            }
+            old_tab: Optional[ChromiumTab] = None
+            old_lock: Any = None
+            with self._lock:
+                if replace_name and created_name and created_name != replace_name:
+                    old_tab = self._tabs.pop(replace_name, None)
+                    old_lock = self._tab_locks.get(replace_name)
+                    self._tabs.pop(created_name, None)
+                    new_lock = self._tab_locks.pop(created_name, tab_lock)
+                    self._tabs[replace_name] = op_tab
+                    self._tab_locks[replace_name] = new_lock
+                    self._active_tab_name = replace_name
+                elif self._tabs.get(op_name) is op_tab:
+                    self._active_tab_name = op_name
+
+            if old_tab is not None:
+                # 旧命名页在新页成功后才关闭；关闭失败只记录，不影响本次结果。
+                try:
+                    with old_lock or self._lock:
+                        self._close_tab_handle(replace_name or "", old_tab)
+                except Exception:
+                    logger.warning(f"[Session:{self.id}] 关闭旧命名页 {replace_name} 失败")
+            return result
+
+    def _complete_navigation(self, tab: ChromiumTab, url: str, timeout: int) -> Dict[str, Any]:
+        """对已加载的标签页执行挑战求解、错误页判断并构造返回结果."""
+        orchestrator = ChallengeOrchestrator(timeout=timeout)
+        domain = urlparse(url).netloc
+        detected = orchestrator.detect(tab)
+        challenge_result: Dict[str, Any]
+
+        if detected is None:
+            # 普通页面仍可并行；内嵌 Turnstile 属于页面级组件，不占用域名闸门。
+            challenge_result = orchestrator.resolve(tab)
+        else:
+            # cf_clearance 是 session+domain 级别的 Cookie。多个 tab 同时过盾
+            # 会互相覆盖 challenge 状态，所以每个域名只允许一个 tab 求解；
+            # 其他 tab 等首个 tab 成功后刷新页面复用 Cookie。
+            gate, generation = self._challenge_gate(domain)
+            with gate:
+                current_generation = self._challenge_gate(domain)[1]
+                if current_generation != generation:
+                    try:
+                        tab.refresh()  # type: ignore[union-attr]
+                        tab.wait(1)  # type: ignore[union-attr]
+                    except Exception:
+                        logger.debug(f"[Session:{self.id}] 等待过盾后刷新标签页失败")
+                    if orchestrator.detect(tab) is None:
+                        challenge_result = {
+                            "detected": True,
+                            "type": getattr(detected, "challenge_type", "challenge"),
+                            "solved": True,
+                            "reused": True,
+                            "layers": [],
+                        }
+                    else:
+                        challenge_result = orchestrator.resolve(tab)
+                else:
+                    challenge_result = orchestrator.resolve(tab)
+
+                if challenge_result.get("solved"):
+                    self._bump_challenge_generation(domain)
+
+        if challenge_result.get("solved"):
+            self._mark_challenge_solved(domain)
+        elif detected is not None and orchestrator.detect(tab) is not None:
+            # clearance 可能是旧 UA/IP 留下的失效 Cookie；标记该域需要重新过盾，
+            # 并删除失效 Cookie，避免后续 tab 继续被放行到挑战页。
+            self._mark_challenge_failed(domain)
+            self._clear_clearance_cookies(tab, domain)
+
+        html = self._read_html(tab)
+        self._sync_page_cookies(tab, domain)
+
+        page_url = url
+        page_title = ""
+        try:
+            page_url = str(tab.url or url)
+            page_title = str(tab.title or "")
         except Exception:
-            # 求解/读取异常：关闭本次新建的标签页，避免失败循环里累积孤儿标签页
-            try:
-                self.close_tab(self._active_tab_name)  # type: ignore[arg-type]
-            except Exception:
-                logger.debug(f"[Session:{self.id}] 清理异常导航的标签页失败，交由 TTL 回收")
-            raise
+            logger.debug("读取页面 URL/标题失败，使用原始 URL")
 
-    def get_html(self) -> Dict[str, Any]:
+        # 浏览器网络错误页和未通过挑战都不是“成功导航”。
+        if self._is_browser_error_page(page_url, html):
+            raise RuntimeError(f"浏览器导航失败: {page_url or url}")
+        # 挑战器超时并不等于页面失败：Cloudflare 常在 solver 内部已经放行，
+        # 页面业务内容已加载（标题/HTML 正常）。是否真正失败交给调用方按
+        # 页面内容判断，避免把已加载的数据误报为 500。
+
+        return {
+            "url": page_url,
+            "title": page_title,
+            "html": html,
+            "cookies": self.cookie_store.as_dict(domain),
+            "cookie_header": self.cookie_store.as_header(domain),
+            "challenge": challenge_result,
+        }
+
+    def _page_result(self, tab: ChromiumTab, domain: str, challenge: Dict[str, Any]) -> Dict[str, Any]:
+        """构造页面结果，读取失败时返回空 HTML 而不是抛错。"""
+        return {
+            "url": getattr(tab, "url", ""),
+            "title": getattr(tab, "title", ""),
+            "html": self._read_html(tab),
+            "cookies": self.cookie_store.as_dict(domain),
+            "cookie_header": self.cookie_store.as_header(domain),
+            "challenge": challenge,
+        }
+
+    def _read_html(self, tab: ChromiumTab) -> str:
+        try:
+            return str(tab.html)
+        except Exception:
+            logger.debug(f"[Session:{self.id}] 读取页面 HTML 失败")
+            return ""
+
+    @staticmethod
+    def _is_browser_error_page(url: str, html: str) -> bool:
+        """识别 Chromium 内置错误页（DNS/连接/超时等），不能当业务页面返回。"""
+        lowered_url = str(url or "").lower()
+        if lowered_url.startswith(("chrome-error://", "edge-error://", "about:neterror")):
+            return True
+        head = (html or "")[:30000].lower()
+        return any(
+            marker in head
+            for marker in (
+                "neterror",
+                "--error-code-color",
+                "#main-frame-error",
+                'id="main-frame-error"',
+                "err_connection_refused",
+                "err_name_not_resolved",
+                "err_timed_out",
+                "err_internet_disconnected",
+                "err_address_unreachable",
+                "err_ssl_protocol_error",
+            )
+        )
+
+    def get_html(self, tab_name: Optional[str] = None) -> Dict[str, Any]:
         self.touch()
-        tab = self._get_active_tab()
-        return {"url": tab.url, "html": tab.html}
+        try:
+            name, tab = self._lookup_tab(tab_name)
+        except (ValueError, RuntimeError):
+            # 读取是只读操作：没有标签页就返回空，绝不隐式创建 about:blank。
+            return {"url": "", "html": ""}
+        with self._tab_lock_for(name):
+            if self._tabs.get(name) is not tab:
+                return {"url": "", "html": ""}
+            return {"url": str(getattr(tab, "url", "") or ""), "html": self._read_html(tab)}
 
     # ---------- 页面交互 ----------
 
@@ -177,14 +388,15 @@ class Session(TabMixin):
         否则使用 DrissionPage 原生 click。
         """
         self.touch()
-        tab = self._get_active_tab()
-        if humanize:
-            try:
-                human_click_selector(tab, selector)
-                return
-            except Exception:
-                logger.debug(f"[Session:{self.id}] 人性化点击失败，回退原生 click")
-        tab.ele(selector).click(by_js=None)  # type: ignore[union-attr]
+        name, tab = self._lookup_tab()
+        with self._tab_lock_for(name):
+            if humanize:
+                try:
+                    human_click_selector(tab, selector)
+                    return
+                except Exception:
+                    logger.debug(f"[Session:{self.id}] 人性化点击失败，回退原生 click")
+            tab.ele(selector).click(by_js=None)  # type: ignore[union-attr]
 
     def drag(self, selector: str, offset_x: int, offset_y: int = 0, duration: float = 1.0) -> None:
         """人性化拖拽（滑块验证码）：按住元素 → 弧线轨迹移动到目标偏移。
@@ -196,24 +408,31 @@ class Session(TabMixin):
             duration: 拖拽时长（秒）
         """
         self.touch()
-        human_drag_selector(self._get_active_tab(), selector, offset_x, offset_y, duration)
+        name, tab = self._lookup_tab()
+        with self._tab_lock_for(name):
+            human_drag_selector(tab, selector, offset_x, offset_y, duration)
 
     def input_text(self, selector: str, text: str) -> None:
         self.touch()
-        ele = self._get_active_tab().ele(selector)
-        ele.clear()  # type: ignore[union-attr]
-        ele.input(text)  # type: ignore[union-attr]
+        name, tab = self._lookup_tab()
+        with self._tab_lock_for(name):
+            ele = tab.ele(selector)
+            ele.clear()  # type: ignore[union-attr]
+            ele.input(text)  # type: ignore[union-attr]
 
-    def execute(self, script: str) -> Any:
+    def execute(self, script: str, tab_name: Optional[str] = None) -> Any:
         self.touch()
-        return self._get_active_tab().run_js(script)  # type: ignore[union-attr]
+        name, tab = self._lookup_tab(tab_name)
+        with self._tab_lock_for(name):
+            return tab.run_js(script)  # type: ignore[union-attr]
 
     def solve_turnstile(self, timeout: int = 25) -> Dict[str, Any]:
         """显式触发内嵌 Turnstile 求解（点击复选框/等待 token），供搜索等表单场景调用."""
         self.touch()
-        tab = self._get_active_tab()
-        ok = CloudflareResolver().solve_embedded_widget(tab, timeout=timeout)
-        return {"solved": bool(ok)}
+        name, tab = self._lookup_tab()
+        with self._tab_lock_for(name):
+            ok = CloudflareResolver().solve_embedded_widget(tab, timeout=timeout)
+            return {"solved": bool(ok)}
 
     # ---------- 代理 ----------
 
@@ -221,43 +440,41 @@ class Session(TabMixin):
         """运行时切换会话代理。
 
         DrissionPage 5.0 的 Chromium 代理只能在创建上下文时指定，因此切换代理
-        会重建活动标签页（迁移到带新代理的上下文）。返回迁移结果。
+        会重建标签页（迁移到带新代理的上下文）。返回迁移结果。
         """
         self.touch()
-        if proxy == self._proxy and self._proxy_context is not None:
-            return {"proxy": proxy, "applied_tabs": 1, "errors": []}
-        old_active_url = ""
-        try:
-            if self._active_tab_name:
-                old_active_url = self._tabs[self._active_tab_name].url  # type: ignore[union-attr]
-        except Exception as e:
-            logger.debug(f"[Session:{self.id}] 读取旧标签页 URL 失败(可忽略): {e}")
-
-        # 关闭旧代理上下文
-        if self._proxy_context is not None:
+        with self._lock:
+            if proxy == self._proxy and self._proxy_context is not None:
+                return {"proxy": proxy, "applied_tabs": 1, "errors": []}
+            self._closed = True
+            old_active_url = ""
             try:
-                self._proxy_context.close()  # type: ignore[union-attr]
+                if self._active_tab_name:
+                    old_active_url = str(self._tabs[self._active_tab_name].url or "")
             except Exception as e:
-                logger.debug(f"[Session:{self.id}] 关闭旧代理上下文失败(可忽略): {e}")
+                logger.debug(f"[Session:{self.id}] 读取旧标签页 URL 失败(可忽略): {e}")
+            old_context = self._proxy_context
             self._proxy_context = None
 
-        # 现有标签页清空（旧上下文即将被代理上下文替代）
-        for name in list(self._tabs.keys()):
-            self._tabs.pop(name)
-        self._active_tab_name = None
-        self._proxy = proxy
+        self.close_all_tabs()
+        if old_context is not None:
+            try:
+                old_context.close()  # type: ignore[union-attr]
+            except Exception as e:
+                logger.debug(f"[Session:{self.id}] 关闭旧代理上下文失败(可忽略): {e}")
 
         errors: list[str] = []
         applied = 0
+        with self._lock:
+            self._proxy = proxy
+            self._closed = False
         if proxy:
             try:
-                new_tab = self._make_tab()
-                name = self._auto_tab_name()
-                self._tabs[name] = new_tab
-                self._active_tab_name = name
+                name, new_tab = self._create_tab_handle()
+                with self._tab_lock_for(name):
+                    if old_active_url:
+                        new_tab.get(old_active_url)  # type: ignore[union-attr]
                 applied = 1
-                if old_active_url:
-                    new_tab.get(old_active_url)  # type: ignore[union-attr]
             except Exception as e:
                 errors.append(f"{e}")
         return {"proxy": proxy, "applied_tabs": applied, "errors": errors}
@@ -268,31 +485,38 @@ class Session(TabMixin):
     # ---------- 生命周期 ----------
 
     def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            proxy_context = self._proxy_context
+            self._proxy_context = None
         self.close_all_tabs()
-        if self._proxy_context is not None:
+        if proxy_context is not None:
             try:
-                self._proxy_context.close()  # type: ignore[union-attr]
+                proxy_context.close()  # type: ignore[union-attr]
             except Exception as e:
                 logger.debug(f"[Session:{self.id}] 关闭代理上下文失败(可忽略): {e}")
-            self._proxy_context = None
+        with self._lock:
+            self._active_tab_name = None
+            self._tab_locks.clear()
         self.cookie_store.clear()
         logger.info(f"[Session:{self.id}] 已关闭")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "fingerprint": self.fingerprint.profile_name,
-            "fp_profile_id": self.fp_profile_id,
-            # 实际生效的 UA（None 表示会话 UA 覆盖已被放弃，使用画像原生 UA）
-            "user_agent": self._user_agent,
-            "ua_override_applied": bool(self._user_agent),
-            # 请求时声明的身份，供调用方对比实际生效值
-            "requested_user_agent": self._requested_user_agent,
-            "requested_fp_profile_id": self._requested_fp_profile_id,
-            "profile_reconciled": bool(
-                self._requested_fp_profile_id and self._requested_fp_profile_id != self.fp_profile_id
-            ),
-            "tabs": list(self._tabs.keys()),
-            "active_tab": self._active_tab_name,
-            "cookie_domains": self.cookie_store.list_domains(),
-        }
+        with self._lock:
+            return {
+                "id": self.id,
+                "fingerprint": self.fingerprint.profile_name,
+                "fp_profile_id": self.fp_profile_id,
+                # 实际生效的 UA（None 表示会话 UA 覆盖已被放弃，使用画像原生 UA）
+                "user_agent": self._user_agent,
+                "ua_override_applied": bool(self._user_agent),
+                # 请求时声明的身份，供调用方对比实际生效值
+                "requested_user_agent": self._requested_user_agent,
+                "requested_fp_profile_id": self._requested_fp_profile_id,
+                "profile_reconciled": bool(
+                    self._requested_fp_profile_id and self._requested_fp_profile_id != self.fp_profile_id
+                ),
+                "tabs": list(self._tabs.keys()),
+                "active_tab": self._active_tab_name,
+                "cookie_domains": self.cookie_store.list_domains(),
+            }

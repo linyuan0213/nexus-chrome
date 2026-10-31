@@ -94,10 +94,15 @@ def profile_fits_ua(fp_env: dict[str, str] | None, ua: str | None) -> bool:
     UA 不含可识别字段时不做限制（返回 True）。缺失画像 env 视为无法判定（True），
     由调用方决定是否按 UA 重新绑定画像。
     """
-    if not fp_env or not ua:
+    if not fp_env:
+        return True
+    if not ua:
         return True
     ident = ua_identity(ua)
-    if ident["uad_platform"] and fp_env.get("FP_UAD_PLATFORM") != ident["uad_platform"]:
+    # 不能识别的 UA 不与任何画像混用，避免非 Chrome UA + Chrome UA-CH。
+    if not ident["uad_platform"] or not ident["chrome_major"]:
+        return False
+    if fp_env.get("FP_UAD_PLATFORM") != ident["uad_platform"]:
         return False
     if ident["chrome_major"] and fp_env.get("FP_UA_BRAND") != ident["chrome_major"]:
         return False
