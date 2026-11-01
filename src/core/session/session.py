@@ -148,6 +148,28 @@ class Session(TabMixin):
             except Exception as e:
                 logger.warning(f"[Session:{self.id}] 设置标签页 LocalStorage 失败: {e}")
 
+    def _navigate_with_retry(
+        self,
+        url: str,
+        tab_name: str | None,
+        cookie: str | None,
+        referer: str | None,
+        timeout: int | None,
+        local_storage: Optional[Dict[str, str]],
+    ):
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return self._navigate_impl(url, tab_name, cookie, referer, timeout or CHALLENGE_TIMEOUT, local_storage)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt == 0 and ("500" in str(exc) or "Server error" in str(exc)):
+                    time.sleep(1.5)
+                    continue
+                raise
+        assert last_error is not None
+        raise last_error
+
     def navigate(
         self,
         url: str,
@@ -177,9 +199,9 @@ class Session(TabMixin):
             # clearance 已由探针验证后，从队列取出并发执行；限制同域并发，
             # 避免站点被突发请求打成 500。
             with self._parallel_gate(domain):
-                return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+                return self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
         try:
-            result = self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+            result = self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
             raw_challenge = result.get("challenge") if hasattr(result, "get") else None
             challenge = cast(dict[str, Any], raw_challenge) if isinstance(raw_challenge, dict) else {}
             html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
