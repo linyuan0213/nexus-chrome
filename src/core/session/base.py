@@ -5,7 +5,7 @@
 """
 
 import time
-from threading import Condition, RLock
+from threading import Condition, RLock, Semaphore
 from typing import Any, Dict, Optional
 
 from DrissionPage import Chromium
@@ -22,6 +22,8 @@ from src.fp.ua import derive_platform, resolve_ua_fields
 class SessionBase:
     # 域名“已验证”窗口；超过窗口后重新串行探测一次。
     DOMAIN_VERIFY_TTL = 30.0
+    # 过盾成功后同域并发上限，避免一次性并发触发站点 5xx/限流。
+    DOMAIN_PARALLEL_LIMIT = 2
 
     """Session 共享状态与底层原语（不直接实例化）。"""
 
@@ -47,6 +49,8 @@ class SessionBase:
     _verified_at: Dict[str, float]
     _probing_domains: set[str]
     _probe_conditions: Dict[str, Any]
+    _parallel_gates: Dict[str, Any]
+    _parallel_gates: Dict[str, Any]
     _closed: bool
 
     @property
@@ -83,6 +87,14 @@ class SessionBase:
     def _mark_challenge_solved(self, domain: str) -> None:
         with self._lock:
             self._challenge_failed.discard(domain)
+
+    def _parallel_gate(self, domain: str):
+        with self._lock:
+            gate = self._parallel_gates.get(domain)
+            if gate is None:
+                gate = Semaphore(self.DOMAIN_PARALLEL_LIMIT)
+                self._parallel_gates[domain] = gate
+            return gate
 
     def _probe_condition(self, domain: str):
         with self._lock:
