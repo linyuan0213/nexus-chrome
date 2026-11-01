@@ -2,6 +2,11 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.13] - 2026-11-01
+
+### 修复
+- 同域队列导航遇到 HTTP 500 时短退避重试一次，避免瞬时站点错误丢弃 URL。
+
 ## [v3.4.12] - 2026-11-01
 
 ### 修复
