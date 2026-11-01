@@ -15,6 +15,7 @@ from src.config.settings import CHALLENGE_TIMEOUT
 from src.core.cookie_store import CookieStore
 from src.core.fingerprint import FingerprintManager
 from src.core.session.tabs import TabMixin
+from src.utils.challenge_utils import under_challenge
 from src.utils.humanize import human_click_selector, human_drag_selector
 
 
@@ -169,7 +170,8 @@ class Session(TabMixin):
                     is_probe = True
                     break
                 # 有探针正在过盾：等它成功/失败后再决定并行或接力串行。
-                cond.wait(timeout=max(1, int(timeout)))
+                # 排队等待探针，不把导航 timeout 消耗在队列等待上。
+                cond.wait(timeout=300)
         if not is_probe:
             # clearance 已由探针验证，后续页面可以并行。
             return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
@@ -177,8 +179,13 @@ class Session(TabMixin):
             result = self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
             raw_challenge = result.get("challenge") if hasattr(result, "get") else None
             challenge = cast(dict[str, Any], raw_challenge) if isinstance(raw_challenge, dict) else {}
+            html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
+            probe_ok = bool(challenge.get("solved"))
+            # 求解器超时但页面已经脱离挑战时也应放行，不能把后续队列继续串行。
+            if not probe_ok and html_text and not under_challenge(html_text):
+                probe_ok = True
             with cond:
-                if challenge.get("solved"):
+                if probe_ok:
                     self._mark_domain_verified(domain)
                 else:
                     self._verified_at.pop(domain, None)
