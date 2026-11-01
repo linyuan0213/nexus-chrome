@@ -2,6 +2,12 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.10] - 2026-11-01
+
+### 修复
+- Managed Challenge 自动点击 Turnstile；同域单探针串行过盾，成功后并行。
+- 保护新 `cf_clearance` 不被旧 Cookie 覆盖；临时 `auto_*` 标签页统一关闭。
+
 ## [v3.4.7] - 2026-10-31
 
 ### 修复

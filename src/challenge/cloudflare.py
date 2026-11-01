@@ -153,9 +153,26 @@ class CloudflareResolver(ChallengeResolver):
         return False
 
     def _wait_managed(self, tab: ChromiumTab, timeout: int) -> bool:
-        """Managed Challenge：Cloudflare JS 自动求解，只需等待并轮询。"""
-        logger.debug("Cloudflare Managed Challenge，等待 JS 自动求解...")
-        return self._wait_challenge_cleared(tab, timeout)
+        """Managed Challenge：等待 JS 自动求解，同时捕获后出现的 Turnstile 复选框。"""
+        logger.debug("Cloudflare Managed Challenge，等待 JS/复选框...")
+        deadline = time.monotonic() + max(1, timeout)
+        while time.monotonic() < deadline:
+            try:
+                if not page_title_is_challenge(tab):
+                    html = tab.html
+                    if not _under_cf_challenge(html):
+                        return True
+            except Exception as exc:
+                logger.debug(f"Managed Challenge 状态读取失败: {exc}")
+            # 托管页的复选框可能延迟 5~15s 才渲染；出现后立即点击，
+            # 不要干等整个 timeout（第一次失败、第二次才成功就是这个问题）。
+            located = locate_turnstile_box(tab, timeout=1)
+            if located is not None:
+                remaining = max(1, int(deadline - time.monotonic()))
+                if self._solve_box(tab, remaining, located):
+                    return True
+            time.sleep(1)
+        return False
 
     def _solve_standard(self, tab: ChromiumTab, timeout: int) -> bool:
         """标准 Cloudflare 挑战：尝试点击 Turnstile 复选框。"""

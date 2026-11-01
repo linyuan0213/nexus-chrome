@@ -5,7 +5,7 @@
 """
 
 import time
-from threading import RLock
+from threading import Condition, RLock
 from typing import Any, Dict, Optional
 
 from DrissionPage import Chromium
@@ -20,6 +20,9 @@ from src.fp.ua import derive_platform, resolve_ua_fields
 
 
 class SessionBase:
+    # 域名“已验证”窗口；超过窗口后重新串行探测一次。
+    DOMAIN_VERIFY_TTL = 30.0
+
     """Session 共享状态与底层原语（不直接实例化）。"""
 
     id: str
@@ -41,6 +44,9 @@ class SessionBase:
     _challenge_locks: Dict[str, Any]
     _challenge_generations: Dict[str, int]
     _challenge_failed: set[str]
+    _verified_at: Dict[str, float]
+    _probing_domains: set[str]
+    _probe_conditions: Dict[str, Any]
     _closed: bool
 
     @property
@@ -72,15 +78,44 @@ class SessionBase:
     def _mark_challenge_failed(self, domain: str) -> None:
         with self._lock:
             self._challenge_failed.add(domain)
+            self._verified_at.pop(domain, None)
 
     def _mark_challenge_solved(self, domain: str) -> None:
         with self._lock:
             self._challenge_failed.discard(domain)
 
+    def _probe_condition(self, domain: str):
+        with self._lock:
+            cond = self._probe_conditions.get(domain)
+            if cond is None:
+                cond = Condition(self._lock)
+                self._probe_conditions[domain] = cond
+            return cond
+
+    def _domain_verified(self, domain: str) -> bool:
+        with self._lock:
+            ts = self._verified_at.get(domain)
+            return bool(ts and time.monotonic() - ts <= self.DOMAIN_VERIFY_TTL)
+
+    def _mark_domain_verified(self, domain: str) -> None:
+        with self._lock:
+            self._verified_at[domain] = time.monotonic()
+            self._probing_domains.discard(domain)
+            cond = self._probe_conditions.get(domain)
+            if cond is not None:
+                cond.notify_all()
+
+    def _clear_domain_verified(self, domain: str) -> None:
+        with self._lock:
+            self._verified_at.pop(domain, None)
+
     def _clear_clearance_cookies(self, tab: ChromiumTab, domain: str) -> None:
         """挑战失败后清除失效的 cf_clearance/cf_chl_*，让下一次重新过盾."""
+        with self._lock:
+            self._verified_at.pop(domain, None)
         names = ("cf_clearance", "cf_chl_rc_ni", "cf_chl_prog", "cf_chl_2")
         for name in names:
+            self.cookie_store.delete_cookie(domain, name)
             for cookie_domain in (domain, f".{domain}"):
                 try:
                     tab.run_cdp(  # type: ignore[union-attr]

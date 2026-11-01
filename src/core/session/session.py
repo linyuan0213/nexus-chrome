@@ -2,7 +2,7 @@
 
 import time
 from threading import RLock
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 from urllib.parse import urlparse
 
 from DrissionPage import Chromium
@@ -50,6 +50,9 @@ class Session(TabMixin):
         self._challenge_locks: Dict[str, Any] = {}
         self._challenge_generations: Dict[str, int] = {}
         self._challenge_failed: set[str] = set()
+        self._verified_at: Dict[str, float] = {}
+        self._probing_domains: set[str] = set()
+        self._probe_conditions: Dict[str, Any] = {}
         self._closed = False
         self.instance_key: Optional[str] = None
         self._active_tab_name: Optional[str] = None
@@ -118,7 +121,13 @@ class Session(TabMixin):
             merged[str(c.get("name") or "")] = dict(c)
         if cookie:
             for c in self._parse_cookie_header(cookie):
-                merged[str(c.get("name") or "")] = dict(c)
+                name = str(c.get("name") or "")
+                # cf_clearance 绑定当前浏览器 UA/IP，provider 里可能还是旧值；
+                # 会话内刚过盾的新 Cookie 绝不能被显式 Cookie 覆盖。
+                if name in {"cf_clearance", "__cf_bm", "_cfuvid"} or name.startswith("cf_chl"):
+                    if name in merged:
+                        continue
+                merged[name] = dict(c)
         cookies = [c for name, c in merged.items() if name]
         if cookies:
             cookies = self.limit_cookie_header(cookies)
@@ -149,11 +158,39 @@ class Session(TabMixin):
         # 没有 cf_clearance 时，导航本身也会触发挑战；必须在建 tab 之前
         # 按 session+domain 串行，否则并发请求会各自开一个“请稍候”标签页。
         domain = urlparse(url).netloc
-        if self._has_clearance(domain):
+        cond = self._probe_condition(domain)
+        is_probe = False
+        with cond:
+            while True:
+                if self._domain_verified(domain):
+                    break
+                if domain not in self._probing_domains:
+                    self._probing_domains.add(domain)
+                    is_probe = True
+                    break
+                # 有探针正在过盾：等它成功/失败后再决定并行或接力串行。
+                cond.wait(timeout=max(1, int(timeout)))
+        if not is_probe:
+            # clearance 已由探针验证，后续页面可以并行。
             return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
-        gate, _ = self._challenge_gate(domain)
-        with gate:
-            return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+        try:
+            result = self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+            raw_challenge = result.get("challenge") if hasattr(result, "get") else None
+            challenge = cast(dict[str, Any], raw_challenge) if isinstance(raw_challenge, dict) else {}
+            with cond:
+                if challenge.get("solved"):
+                    self._mark_domain_verified(domain)
+                else:
+                    self._verified_at.pop(domain, None)
+                    self._probing_domains.discard(domain)
+                    cond.notify_all()
+            return result
+        except Exception:
+            with cond:
+                self._verified_at.pop(domain, None)
+                self._probing_domains.discard(domain)
+                cond.notify_all()
+            raise
 
     def _navigate_impl(
         self,
