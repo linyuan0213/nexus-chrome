@@ -54,6 +54,7 @@ class Session(TabMixin):
         self._verified_at: Dict[str, float] = {}
         self._probing_domains: set[str] = set()
         self._probe_conditions: Dict[str, Any] = {}
+        self._parallel_gates: Dict[str, Any] = {}
         self._closed = False
         self.instance_key: Optional[str] = None
         self._active_tab_name: Optional[str] = None
@@ -173,8 +174,10 @@ class Session(TabMixin):
                 # 排队等待探针，不把导航 timeout 消耗在队列等待上。
                 cond.wait(timeout=300)
         if not is_probe:
-            # clearance 已由探针验证，后续页面可以并行。
-            return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
+            # clearance 已由探针验证后，从队列取出并发执行；限制同域并发，
+            # 避免站点被突发请求打成 500。
+            with self._parallel_gate(domain):
+                return self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
         try:
             result = self._navigate_impl(url, tab_name, cookie, referer, timeout, local_storage)
             raw_challenge = result.get("challenge") if hasattr(result, "get") else None
