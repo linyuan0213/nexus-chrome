@@ -371,7 +371,7 @@ class TestTabConcurrency:
         assert len(results) == 2
         assert set(session._tabs) == {"t1", "t2"}
 
-    def test_same_domain_tabs_parallel_after_clearance(self, mock_browser):
+    def test_same_domain_navigations_are_serialized(self, mock_browser):
         started = [threading.Event(), threading.Event()]
         release = threading.Event()
         tabs = []
@@ -392,16 +392,17 @@ class TestTabConcurrency:
         mock_browser.new_tab.side_effect = tabs
         session = Session("s1", mock_browser, FingerprintManager("stealth"))
         session.cookie_store.store("example.com", [{"name": "cf_clearance", "value": "ok"}])
-
         with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
             MockOrchestrator.return_value.resolve.return_value = {"detected": False, "solved": True}
             t1 = threading.Thread(target=session.navigate, args=("https://example.com/0",), kwargs={"tab_name": "t1"})
             t2 = threading.Thread(target=session.navigate, args=("https://example.com/1",), kwargs={"tab_name": "t2"})
             t1.start()
             t2.start()
+            # 同域必须串行：第二个导航要等第一个完成，不能并行打开挑战页。
             assert started[0].wait(1)
-            assert started[1].wait(1)
+            assert not started[1].wait(0.3)
             release.set()
+            assert started[1].wait(1)
             t1.join(2)
             t2.join(2)
 
@@ -754,3 +755,35 @@ class TestNavigateAutoCookie:
         injected = mock_tab.set.cookies.call_args[0][0]
         token = next(c for c in injected if c["name"] == "token")
         assert token["value"] == "explicit-val"
+
+    def test_explicit_stale_clearance_does_not_override_fresh_session_cookie(self, mock_browser, mock_tab):
+        mock_browser.new_tab.return_value = mock_tab
+        session = Session("s1", mock_browser, FingerprintManager("stealth"))
+        session.cookie_store.store(
+            "example.com",
+            [{"name": "cf_clearance", "value": "fresh", "domain": "example.com"}],
+        )
+
+        with patch("src.core.session.session.ChallengeOrchestrator") as MockOrchestrator:
+            MockOrchestrator.return_value.resolve.return_value = {
+                "detected": False,
+                "type": "none",
+                "solved": True,
+                "duration_ms": 0,
+            }
+            session.navigate("https://example.com/page", cookie="cf_clearance=stale")
+
+        injected = mock_tab.set.cookies.call_args[0][0]
+        clearance = next(c for c in injected if c["name"] == "cf_clearance")
+        assert clearance["value"] == "fresh"
+
+
+def test_challenge_failure_clears_stale_clearance_from_store(mock_browser):
+    session = Session("s1", mock_browser, FingerprintManager("stealth"))
+    session.cookie_store.store(
+        "www.javalibrary.com",
+        [{"name": "cf_clearance", "value": "stale", "domain": "www.javalibrary.com"}],
+    )
+    tab = MagicMock()
+    session._clear_clearance_cookies(tab, "www.javalibrary.com")
+    assert session.cookie_store.get("www.javalibrary.com") == []
