@@ -2,7 +2,7 @@
 
 import time
 from threading import RLock
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from DrissionPage import Chromium
@@ -199,16 +199,21 @@ class Session(TabMixin):
             # clearance 已由探针验证后，从队列取出并发执行；限制同域并发，
             # 避免站点被突发请求打成 500。
             with self._parallel_gate(domain):
-                return self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
+                result = self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
+            html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
+            if html_text and under_challenge(html_text):
+                # 验证标记失效（UA/IP 变化或旧 clearance）：撤销并行资格，
+                # 后续请求回到单 tab 探针，避免继续堆积“请稍候”标签页。
+                with cond:
+                    self._verified_at.pop(domain, None)
+                    self._probing_domains.discard(domain)
+                    cond.notify_all()
+            return result
         try:
             result = self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
-            raw_challenge = result.get("challenge") if hasattr(result, "get") else None
-            challenge = cast(dict[str, Any], raw_challenge) if isinstance(raw_challenge, dict) else {}
             html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
-            probe_ok = bool(challenge.get("solved"))
-            # 求解器超时但页面已经脱离挑战时也应放行，不能把后续队列继续串行。
-            if not probe_ok and html_text and not under_challenge(html_text):
-                probe_ok = True
+            # 以真实页面内容为准：求解器可能误报 solved，但页面仍是挑战页。
+            probe_ok = bool(html_text) and not under_challenge(html_text)
             with cond:
                 if probe_ok:
                     self._mark_domain_verified(domain)
