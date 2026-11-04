@@ -453,7 +453,20 @@ class Session(TabMixin):
         with self._tab_lock_for(name):
             if self._tabs.get(name) is not tab:
                 return {"url": "", "html": ""}
-            return {"url": str(getattr(tab, "url", "") or ""), "html": self._read_html(tab)}
+            try:
+                return {"url": str(getattr(tab, "url", "") or ""), "html": self._read_html(tab)}
+            except Exception as exc:  # noqa: BLE001 - 卡死 tab 必须清理，不能让会话永久坏掉
+                logger.warning(f"[Session:{self.id}] 读取标签页失败，清理失效 tab {name}: {exc}")
+                with self._lock:
+                    self._tabs.pop(name, None)
+                    self._tab_locks.pop(name, None)
+                    if self._active_tab_name == name:
+                        self._active_tab_name = next(reversed(self._tabs), None)
+                try:
+                    self._close_tab_handle(name, tab)
+                except Exception as close_exc:  # noqa: BLE001
+                    logger.warning(f"[Session:{self.id}] 清理失效标签页失败 {name}: {close_exc}")
+                return {"url": "", "html": ""}
 
     # ---------- 页面交互 ----------
 
