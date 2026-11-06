@@ -26,7 +26,7 @@ class BrowserPool:
     def __init__(self, max_browsers: int = MAX_BROWSERS):
         self._max_browsers = max_browsers
         self._instances: Dict[str, ChromeInstance] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._next_port = DEBUG_PORT
         self._next_display = VNC_DISPLAY_BASE
         self._display_reuse: set[int] = set()
