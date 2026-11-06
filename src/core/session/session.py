@@ -2,7 +2,7 @@
 
 import time
 from threading import RLock
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from DrissionPage import Chromium
@@ -199,16 +199,21 @@ class Session(TabMixin):
             # clearance 已由探针验证后，从队列取出并发执行；限制同域并发，
             # 避免站点被突发请求打成 500。
             with self._parallel_gate(domain):
-                return self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
+                result = self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
+            html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
+            if html_text and under_challenge(html_text):
+                # 验证标记失效（UA/IP 变化或旧 clearance）：撤销并行资格，
+                # 后续请求回到单 tab 探针，避免继续堆积“请稍候”标签页。
+                with cond:
+                    self._verified_at.pop(domain, None)
+                    self._probing_domains.discard(domain)
+                    cond.notify_all()
+            return result
         try:
             result = self._navigate_with_retry(url, tab_name, cookie, referer, timeout, local_storage)
-            raw_challenge = result.get("challenge") if hasattr(result, "get") else None
-            challenge = cast(dict[str, Any], raw_challenge) if isinstance(raw_challenge, dict) else {}
             html_text = str(result.get("html") or "") if hasattr(result, "get") else ""
-            probe_ok = bool(challenge.get("solved"))
-            # 求解器超时但页面已经脱离挑战时也应放行，不能把后续队列继续串行。
-            if not probe_ok and html_text and not under_challenge(html_text):
-                probe_ok = True
+            # 以真实页面内容为准：求解器可能误报 solved，但页面仍是挑战页。
+            probe_ok = bool(html_text) and not under_challenge(html_text)
             with cond:
                 if probe_ok:
                     self._mark_domain_verified(domain)
@@ -448,7 +453,20 @@ class Session(TabMixin):
         with self._tab_lock_for(name):
             if self._tabs.get(name) is not tab:
                 return {"url": "", "html": ""}
-            return {"url": str(getattr(tab, "url", "") or ""), "html": self._read_html(tab)}
+            try:
+                return {"url": str(getattr(tab, "url", "") or ""), "html": self._read_html(tab)}
+            except Exception as exc:  # noqa: BLE001 - 卡死 tab 必须清理，不能让会话永久坏掉
+                logger.warning(f"[Session:{self.id}] 读取标签页失败，清理失效 tab {name}: {exc}")
+                with self._lock:
+                    self._tabs.pop(name, None)
+                    self._tab_locks.pop(name, None)
+                    if self._active_tab_name == name:
+                        self._active_tab_name = next(reversed(self._tabs), None)
+                try:
+                    self._close_tab_handle(name, tab)
+                except Exception as close_exc:  # noqa: BLE001
+                    logger.warning(f"[Session:{self.id}] 清理失效标签页失败 {name}: {close_exc}")
+                return {"url": "", "html": ""}
 
     # ---------- 页面交互 ----------
 
