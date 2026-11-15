@@ -115,15 +115,21 @@ def create_session(
     browser, instance_key = sm.pool.ensure_browser_with_profile(fp_profile_id, fp_env)
     # 关联实例引用（会话删除时无其他引用则回收实例）
     sm.pool.retain(instance_key)
-    return sm.create(
-        session_id=session_id,
-        fingerprint_profile=fingerprint_profile,
-        user_agent=user_agent,
-        proxy=proxy,
-        browser=browser,
-        fp_profile_id=fp_profile_id,
-        fp_env=fp_env,
-        instance_key=instance_key,
-        requested_user_agent=requested_user_agent,
-        requested_fp_profile_id=requested_fp_profile_id,
-    )
+    try:
+        return sm.create(
+            session_id=session_id,
+            fingerprint_profile=fingerprint_profile,
+            user_agent=user_agent,
+            proxy=proxy,
+            browser=browser,
+            fp_profile_id=fp_profile_id,
+            fp_env=fp_env,
+            instance_key=instance_key,
+            requested_user_agent=requested_user_agent,
+            requested_fp_profile_id=requested_fp_profile_id,
+        )
+    except Exception:
+        # create() 失败（典型：同名 session 已存在）时，本次 retain 必须回滚，
+        # 否则并发 ensure 会让实例引用计数只增不减，永远无法回收。
+        sm.pool.release(instance_key)
+        raise

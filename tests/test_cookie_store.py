@@ -137,3 +137,10 @@ class TestCookieStore:
 
         for domain in ["a.com", "b.com", "c.com", "d.com"]:
             assert len(store.get(domain)) == 100
+
+
+def test_reconcile_removes_stale_cookies():
+    store = CookieStore()
+    store.store("example.com", [{"name": "old", "value": "1"}, {"name": "keep", "value": "1"}])
+    store.reconcile("example.com", [{"name": "keep", "value": "2", "domain": "example.com", "path": "/"}])
+    assert store.as_dict("example.com") == {"keep": "2"}

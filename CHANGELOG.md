@@ -2,6 +2,18 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v3.4.15] - 2026-11-15
+
+### 修复
+
+- Cookie 按 domain/path/expiry 管理，浏览器同步会删除失效 Cookie，避免重复值和旧值覆盖。
+- 活跃操作租约阻止 TTL/容量清理误删；创建失败时回滚实例引用。
+- HTTP 请求继承 session 代理，Cookie 头按名称去重。
+
+### 改进
+
+- 收紧挑战判定，普通 403/429 不再触发过盾；execute 500 记录具体堆栈。
+
 ## [v3.4.14] - 2026-11-06
 
 ### 修复

@@ -29,8 +29,15 @@ _DEFAULT_CHROME = (
 
 CHALLENGE_TITLES: List[str] = [
     "Just a moment...",
+    "Just a moment",
     "请稍候…",
+    "请稍候",
+    "Checking your browser",
     "DDOS-GUARD",
+    "安全验证",
+    "安全拦截",
+    "访问验证",
+    "雷池",
 ]
 
 CHALLENGE_SELECTORS: List[str] = [

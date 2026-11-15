@@ -75,7 +75,8 @@ class CookieMixin(SessionBase):
             if cookies:
                 # tab.cookies() 返回浏览器级全部 Cookie，必须按当前页面域名过滤，
                 # 否则搜索站/统计站的大 Cookie 会被错误归到当前站点并撑爆请求头。
-                self._store_cookies(domain, [c for c in cookies if _same_site(c)])
+                filtered = [c for c in cookies if _same_site(c)]
+                self.cookie_store.reconcile(domain, filtered)
         except Exception:
             try:
                 browser_any: Any = self._browser
