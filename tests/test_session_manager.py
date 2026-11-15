@@ -1,6 +1,7 @@
 """SessionManager 持久化注册表测试。"""
 
 import json
+from unittest.mock import MagicMock
 
 from src.core.session.manager import RECOVERED_TTL_SECONDS, SessionManager
 
@@ -40,3 +41,15 @@ class TestRecoveredTTL:
         assert sm.clear_recovered() == 1
         assert sm.recovered_sessions() == []
         assert json.loads(p.read_text(encoding="utf-8"))["sessions"] == []
+
+
+def test_delete_expired_skips_active_session():
+    sm = SessionManager(MagicMock())
+    s = sm.create("active", "stealth", None, None, MagicMock())
+    s.begin_operation()
+    try:
+        assert sm.delete_expired(max_idle_seconds=-1) == 0
+        assert sm.get("active") is s
+    finally:
+        s.end_operation()
+    assert sm.delete_expired(max_idle_seconds=-1) == 1
