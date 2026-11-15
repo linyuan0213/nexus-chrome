@@ -3,6 +3,7 @@
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
 
 from src.api.schemas import (
     ApiResponse,
@@ -94,15 +95,19 @@ async def navigate(session_id: str, request: NavigateRequest):
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        result = await asyncio.to_thread(
-            session.navigate,
-            request.url,
-            request.tab_name,
-            request.cookie,
-            request.referer,
-            request.timeout,
-            request.local_storage,
-        )
+        session.begin_operation()
+        try:
+            result = await asyncio.to_thread(
+                session.navigate,
+                request.url,
+                request.tab_name,
+                request.cookie,
+                request.referer,
+                request.timeout,
+                request.local_storage,
+            )
+        finally:
+            session.end_operation()
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -210,6 +215,7 @@ async def execute_js(session_id: str, request: ExecuteRequest):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.exception(f"execute_js failed session={session_id} tab={request.tab_name}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -244,7 +250,11 @@ async def unified_request(session_id: str, request: RequestOperation):
     try:
         sm = _get_sm()
         session = sm.get(session_id)
-        result = await execute_request(session, **request.model_dump())
+        session.begin_operation()
+        try:
+            result = await execute_request(session, **request.model_dump())
+        finally:
+            session.end_operation()
         return ApiResponse(code=0, message="ok", data=result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

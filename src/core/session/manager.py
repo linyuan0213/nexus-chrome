@@ -139,9 +139,13 @@ class SessionManager:
             if session_id in self._sessions:
                 raise ValueError(f"会话 '{session_id}' 已存在")
             if len(self._sessions) >= self._max_sessions:
-                oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used_at)
-                logger.warning(f"会话数量达到上限 {self._max_sessions}，移除最旧会话 {oldest_id}")
-                self.delete(oldest_id)
+                idle = [s for s in self._sessions.values() if not s.is_active]
+                if idle:
+                    oldest = min(idle, key=lambda s: s.last_used_at)
+                    logger.warning(f"会话数量达到上限 {self._max_sessions}，移除最旧空闲会话 {oldest.id}")
+                    self.delete(oldest.id)
+                else:
+                    logger.warning(f"会话数量达到上限 {self._max_sessions}，所有会话都在使用中，暂不驱逐")
             fingerprint = FingerprintManager(fingerprint_profile)
             session = Session(
                 session_id=session_id,
@@ -199,7 +203,7 @@ class SessionManager:
         threshold = max_idle_seconds if max_idle_seconds is not None else self._session_ttl
         now = time.monotonic()
         with self._lock:
-            expired = [sid for sid, s in self._sessions.items() if now - s.last_used_at > threshold]
+            expired = [sid for sid, s in self._sessions.items() if not s.is_active and now - s.last_used_at > threshold]
             for sid in expired:
                 self.delete(sid)
             return len(expired)

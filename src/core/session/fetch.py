@@ -10,6 +10,7 @@ from loguru import logger
 from src.challenge.resolver import ChallengeOrchestrator
 from src.config.settings import CHALLENGE_TIMEOUT
 from src.core.session.cookies import CookieMixin
+from src.utils.cookie_header import merge_cookie_header
 
 if TYPE_CHECKING:
     from src.core.session.session import Session
@@ -164,9 +165,7 @@ class FetchMixin(CookieMixin):
     ) -> Dict[str, Any]:
         """使用浏览器网络栈请求 URL，自动过盾并返回原始响应体。"""
         domain = urlparse(url).netloc
-        cookie_header = self.cookie_store.as_header(domain)
-        if cookie:
-            cookie_header = f"{cookie_header}; {cookie}" if cookie_header else cookie
+        cookie_header = merge_cookie_header(self.cookie_store.as_header(domain), cookie)
 
         if method.upper() == "GET":
             return self._browser_fetch_get(url, cookie_header, headers, timeout)

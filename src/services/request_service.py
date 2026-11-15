@@ -12,24 +12,31 @@ from typing import Any, Dict, Optional
 from src.config.settings import HTTP_CLIENT_TIMEOUT, HTTP_MAX_REDIRECTS
 from src.http.client import HttpClient
 
-_CHALLENGE_STATUS_CODES = {403, 503, 429}
-_CHALLENGE_INDICATORS = [
-    "Just a moment",
-    "cf-turnstile-response",
-    "Checking your browser",
-    "DDoS protection",
-    "challenge",
-    "cf-challenge",
-    "please wait",
-]
+_CHALLENGE_STATUS_CODES = {403, 503}
+# 只匹配整页 WAF/interstitial 强特征；普通业务 JSON 的 403/429 和页面正文
+# 里的 "challenge"/"please wait" 不能直接触发过盾。
+_CHALLENGE_INDICATORS = (
+    "_cf_chl_opt",
+    "cf-browser-verification",
+    "cf-im-under-attack",
+    "challenge-form",
+    "checking your browser",
+    "just a moment",
+    "ray id",
+    "slg-bg",
+    "slg-box",
+    "ddos protection",
+)
 
 
 def is_challenge_response(result: Dict[str, Any]) -> bool:
-    """判断 fetch 结果是否命中 WAF/盾。"""
-    if result.get("status_code") in _CHALLENGE_STATUS_CODES:
-        return True
-    body = (result.get("body") or "").lower()
-    return any(indicator.lower() in body for indicator in _CHALLENGE_INDICATORS)
+    """判断 fetch 结果是否命中整页 WAF/盾。"""
+    body = str(result.get("body") or "").lower()
+    if not any(indicator in body for indicator in _CHALLENGE_INDICATORS):
+        return False
+    status = result.get("status_code")
+    # 403/503 必须同时有强特征；200 的拦截页也允许命中。
+    return status == 200 or status in _CHALLENGE_STATUS_CODES
 
 
 def clean_response_headers(headers: Dict[str, str]) -> Dict[str, str]:
@@ -58,6 +65,7 @@ async def execute_request(
     client = HttpClient(
         base_timeout=HTTP_CLIENT_TIMEOUT,
         max_redirects=HTTP_MAX_REDIRECTS,
+        proxy=session.get_proxy() if hasattr(session, "get_proxy") else None,
     )
 
     if return_html:

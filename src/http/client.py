@@ -1,17 +1,23 @@
 """HTTP 客户端 — 基于 httpx2，与 Session 的 CookieStore 双向同步 Cookie。"""
 
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from http.cookies import SimpleCookie
+from time import time
 from typing import Any, Dict, List, Optional, cast
 from urllib.parse import urlparse
 
 import httpx2
 from loguru import logger
 
+from src.utils.cookie_header import merge_cookie_header
+
 
 class HttpClient:
-    def __init__(self, base_timeout: int = 30, max_redirects: int = 10):
+    def __init__(self, base_timeout: int = 30, max_redirects: int = 10, proxy: Optional[str] = None):
         self.base_timeout = base_timeout
         self.max_redirects = max_redirects
+        self.proxy = proxy
 
     def fetch(
         self,
@@ -27,12 +33,10 @@ class HttpClient:
 
         used_cookies: List[str] = []
         if cookie_store is not None:
-            domain = urlparse(url).netloc
-            cookie_header = cookie_store.as_header(domain)
+            cookie_header = cookie_store.as_header_for_url(url)
             if cookie_header:
-                existing = merged_headers.get("Cookie", "")
-                merged_headers["Cookie"] = f"{existing}; {cookie_header}" if existing else cookie_header
-                used_cookies = list(cookie_store.as_dict(domain).keys())
+                merged_headers["Cookie"] = merge_cookie_header(merged_headers.get("Cookie", ""), cookie_header)
+                used_cookies = [item.get("name", "") for item in cookie_store.get_for_url(url)]
 
         if timeout is None:
             timeout = self.base_timeout
@@ -42,6 +46,7 @@ class HttpClient:
                 timeout=timeout,
                 follow_redirects=follow_redirects,
                 max_redirects=self.max_redirects,
+                proxy=self.proxy,
             ) as client:
                 response = client.request(
                     method=method,
@@ -81,16 +86,30 @@ class HttpClient:
         cookie = SimpleCookie()
         cookie.load(set_cookie)
         cookies: List[Dict[str, str]] = []
+        now = time()
         for key in cookie.keys():
             morsel = cookie[key]
-            cookies.append(
-                {
-                    "name": morsel.key,
-                    "value": morsel.value,
-                    "domain": morsel.get("domain") or domain,
-                    "path": morsel.get("path") or "/",
-                }
-            )
+            item: Dict[str, Any] = {
+                "name": morsel.key,
+                "value": morsel.value,
+                "domain": morsel.get("domain") or domain,
+                "path": morsel.get("path") or "/",
+            }
+            max_age = morsel.get("max-age")
+            if max_age is not None:
+                try:
+                    item["expires"] = now + int(max_age)
+                except ValueError:
+                    pass
+            elif morsel.get("expires"):
+                try:
+                    item["expires"] = parsedate_to_datetime(morsel["expires"]).replace(tzinfo=timezone.utc).timestamp()
+                except (TypeError, ValueError):
+                    pass
+            if item.get("expires") is not None and float(item["expires"]) <= now:
+                cookie_store.delete_cookie(domain, morsel.key, item["path"])
+                continue
+            cookies.append(item)
         if cookies:
             cookie_store.store(domain, cookies)
             logger.debug(f"HTTP 响应写回 {len(cookies)} 个 Cookie 到 {domain}")

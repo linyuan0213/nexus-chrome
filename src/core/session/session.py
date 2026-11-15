@@ -56,6 +56,7 @@ class Session(TabMixin):
         self._probe_conditions: Dict[str, Any] = {}
         self._parallel_gates: Dict[str, Any] = {}
         self._closed = False
+        self._active_ops = 0
         self.instance_key: Optional[str] = None
         self._active_tab_name: Optional[str] = None
         self._tab_counter = 0
@@ -64,6 +65,24 @@ class Session(TabMixin):
             f"[Session:{self.id}] 已创建 "
             f"(fingerprint={fingerprint.profile_name}, fp_profile={fp_profile_id or 'default'})"
         )
+
+    @property
+    def is_active(self) -> bool:
+        """是否有正在执行的请求/导航；活跃会话不能被 TTL 或容量清理。"""
+        with self._lock:
+            return self._active_ops > 0
+
+    def begin_operation(self) -> None:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError(f"[Session:{self.id}] 会话已关闭")
+            self._active_ops += 1
+            self.touch()
+
+    def end_operation(self) -> None:
+        with self._lock:
+            self._active_ops = max(0, self._active_ops - 1)
+            self.touch()
 
     def _create_tab_handle(self, tab_name: Optional[str] = None) -> tuple[str, ChromiumTab]:
         """只创建并注册空标签页；导航在锁外由 _load_tab 完成."""
@@ -608,4 +627,5 @@ class Session(TabMixin):
                 "tabs": list(self._tabs.keys()),
                 "active_tab": self._active_tab_name,
                 "cookie_domains": self.cookie_store.list_domains(),
+                "active_ops": self._active_ops,
             }
